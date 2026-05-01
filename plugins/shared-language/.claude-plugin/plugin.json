@@ -1,0 +1,9 @@
+{
+  "name": "shared-language",
+  "version": "1.0.0",
+  "description": "Shared domain language tooling. Maintains CONTEXT.md (project vocabulary) inline during grilling, and creates ADRs sparingly. Pairs with adr-sync.",
+  "author": {
+    "name": "Leopoldo Bini",
+    "email": "raul.leopoldobini@gmail.com"
+  }
+}

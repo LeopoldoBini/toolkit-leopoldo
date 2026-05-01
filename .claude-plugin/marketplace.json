@@ -1,0 +1,51 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "toolkit-leopoldo",
+  "description": "Curated engineering toolkit: opinionated stack of plugins for disciplined coding, shared domain language, backlog flow, and communication modes. Adapted in part from mattpocock/skills (MIT).",
+  "owner": {
+    "name": "Leopoldo Bini",
+    "email": "raul.leopoldobini@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "grill-me",
+      "description": "Stress-test plans through relentless interviewing — walks the decision tree branch by branch, one question at a time, exploring the codebase when answers live there. Triggers: 'grill me', 'pressure test', 'poke holes', 'play devil's advocate', 'validar plan', 'discutir antes de implementar'.",
+      "version": "1.0.0",
+      "author": { "name": "Leopoldo Bini" },
+      "source": "./plugins/grill-me",
+      "category": "alignment"
+    },
+    {
+      "name": "engineering-discipline",
+      "description": "Disciplined coding stack: /diagnose (6-phase debugging loop), /deep-modules (architecture review using depth/seam/leverage vocabulary), /tdd-vertical (red-green-refactor with tracer bullets), /zoom-out (higher-level codebase mapping). Shared vocabulary across all four.",
+      "version": "1.0.0",
+      "author": { "name": "Leopoldo Bini" },
+      "source": "./plugins/engineering-discipline",
+      "category": "engineering"
+    },
+    {
+      "name": "shared-language",
+      "description": "Shared domain language tooling: /grill-with-docs (grilling that updates CONTEXT.md inline + offers ADRs sparingly) and /context-bootstrap (bootstrap a CONTEXT.md from an existing codebase). Pairs with adr-sync.",
+      "version": "1.0.0",
+      "author": { "name": "Leopoldo Bini" },
+      "source": "./plugins/shared-language",
+      "category": "documentation"
+    },
+    {
+      "name": "backlog-flow",
+      "description": "Backlog pipeline from PRD to AFK agent: /to-prd (synthesize a PRD from current context), /to-issues (vertical-slice tracer-bullet breakdown), /triage (state-machine for issue roles), /agent-brief (durable handoff format).",
+      "version": "1.0.0",
+      "author": { "name": "Leopoldo Bini" },
+      "source": "./plugins/backlog-flow",
+      "category": "productivity"
+    },
+    {
+      "name": "response-modes",
+      "description": "Optional output styles for response tone/format. Caveman: ultra-terse, drops filler. No-TLDR: overrides the always-on TL;DR rule for fluid chat. Toggle via /output-style or settings.",
+      "version": "1.0.0",
+      "author": { "name": "Leopoldo Bini" },
+      "source": "./plugins/response-modes",
+      "category": "productivity"
+    }
+  ]
+}

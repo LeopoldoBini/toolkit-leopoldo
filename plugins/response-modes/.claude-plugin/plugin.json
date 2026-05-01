@@ -1,0 +1,10 @@
+{
+  "name": "response-modes",
+  "version": "1.0.0",
+  "description": "Optional output styles for response tone/format. Caveman (terse) and no-tldr (override always-on TL;DR rule).",
+  "author": {
+    "name": "Leopoldo Bini",
+    "email": "raul.leopoldobini@gmail.com"
+  },
+  "outputStyles": "./output-styles/"
+}

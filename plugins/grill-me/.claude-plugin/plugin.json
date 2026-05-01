@@ -1,0 +1,9 @@
+{
+  "name": "grill-me",
+  "version": "1.0.0",
+  "description": "Stress-test plans through relentless interviewing. Walks the decision tree one question at a time, exploring the codebase when the answer lives there.",
+  "author": {
+    "name": "Leopoldo Bini",
+    "email": "raul.leopoldobini@gmail.com"
+  }
+}

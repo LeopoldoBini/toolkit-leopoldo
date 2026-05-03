@@ -1,9 +1,0 @@
-{
-  "name": "engineering-discipline",
-  "version": "1.0.0",
-  "description": "Disciplined coding stack: /diagnose, /deep-modules, /tdd-vertical, /zoom-out. All four share a depth/seam/leverage vocabulary so suggestions stay consistent.",
-  "author": {
-    "name": "Leopoldo Bini",
-    "email": "raul.leopoldobini@gmail.com"
-  }
-}

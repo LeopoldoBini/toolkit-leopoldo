@@ -1,9 +1,0 @@
-{
-  "name": "backlog-flow",
-  "version": "1.0.0",
-  "description": "Backlog pipeline from raw context to AFK-ready issues: /to-prd, /to-issues, /triage, /agent-brief. Issue-tracker-agnostic.",
-  "author": {
-    "name": "Leopoldo Bini",
-    "email": "raul.leopoldobini@gmail.com"
-  }
-}

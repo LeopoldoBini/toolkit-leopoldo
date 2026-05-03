@@ -30,10 +30,11 @@ Orden default cuando se arranca o retoma trabajo en este repo. Cada paso se invo
 2. **`/grill-with-docs`** (o `/grill-me` para no-código) — alineación: el agente te interroga hasta que el plan esté claro. Actualiza `CONTEXT.md` y propone ADRs cuando hay decisiones grandes.
 3. **`/to-prd`** — sintetiza un PRD durable a partir de la conversación. Misma sesión que el grilling.
 4. **`/to-issues`** — rompe el PRD en **vertical slices** (tracer bullets). Anti-horizontal.
-5. **`/agent-brief <issue>`** — opcional: contrato durable (acceptance criteria, out-of-scope, sin paths frágiles) para handoff a un AFK agent vía `/schedule`.
-6. **`/tdd-vertical`** + **`/diagnose`** — ejecutar issue por issue con red-green-refactor; `/diagnose` cuando algo se rompe.
-7. **`/zoom-out`** + **`/deep-modules`** — cada 3-5 issues cerrados, sanidad arquitectónica (mapeo de alto nivel + deepening opportunities).
-8. **`/triage`** — cuando el backlog crece, máquina de estados sobre los issues.
+5. **Implementación — bifurcación según modo**. Los issues se ejecutan en uno de dos modos; elegir antes de empezar:
+   - **Sesión interactiva** (vos al teclado con Claude): directo a **`/tdd-vertical`** + **`/diagnose`**. Red-green-refactor un slice a la vez; `/diagnose` cuando algo se rompe. Sin agent-brief — el contexto vive en la conversación.
+   - **AFK / handoff a agente remoto**: **`/agent-brief <issue>`** (contrato durable — acceptance criteria, out-of-scope, sin paths frágiles) + **`/schedule`** (cuándo se dispara). El agente AFK ejecuta `/tdd-vertical` adentro, contra el brief, sin vos al lado.
+6. **`/zoom-out`** + **`/deep-modules`** — cada 3-5 issues cerrados, sanidad arquitectónica (mapeo de alto nivel + deepening opportunities).
+7. **`/triage`** — cuando el backlog crece, máquina de estados sobre los issues.
 
 ### Reglas
 - Saltarse el paso 2 (alineación) es la causa #1 de retrabajo. No saltearlo.

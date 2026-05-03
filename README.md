@@ -31,10 +31,11 @@ This seeds (or refreshes, idempotently) a `## Pipeline de trabajo (engineering-w
 2. **`/grill-with-docs`** (or `/grill-me` for non-code) — alignment session.
 3. **`/to-prd`** — synthesise a PRD from the conversation.
 4. **`/to-issues`** — break the PRD into vertical slices.
-5. **`/agent-brief`** — durable handoff for AFK agents (optional).
-6. **`/tdd-vertical`** + **`/diagnose`** — execute one slice at a time.
-7. **`/zoom-out`** + **`/deep-modules`** — every 3-5 closed issues, architectural sanity check.
-8. **`/triage`** — when the backlog grows.
+5. **Implementation — pick a mode per issue**:
+   - **Interactive session** (you at the keyboard with Claude): straight to `/tdd-vertical` + `/diagnose`.
+   - **AFK / remote agent handoff**: `/agent-brief <issue>` (durable contract — acceptance criteria, out-of-scope, no fragile paths) + `/schedule` (when it fires). The AFK agent runs `/tdd-vertical` against the brief, unattended.
+6. **`/zoom-out`** + **`/deep-modules`** — every 3-5 closed issues, architectural sanity check.
+7. **`/triage`** — when the backlog grows.
 
 ## Migration v1 → v2 (BREAKING)
 

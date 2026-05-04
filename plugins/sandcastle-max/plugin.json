@@ -1,0 +1,9 @@
+{
+  "name": "sandcastle-max",
+  "version": "0.1.0",
+  "description": "Run @ai-hero/sandcastle (AFK Claude Code agents in Docker) using your Claude Max subscription via CLAUDE_CODE_OAUTH_TOKEN instead of paying for ANTHROPIC_API_KEY tokens. Workaround for Sandcastle issue #191 (wontfix). Slash commands: /sandcastle-init scaffolds .sandcastle/ in any repo with the fixed Dockerfile (chmod 1777 + state cleanup), OAuth-aware main.mts, package.json scripts, and a Keychain→env helper. Skill: sandcastle-afk documents the three non-obvious gotchas (interactive init, UID mismatch, .claude.json perm cleanup) and the troubleshooting path.",
+  "author": {
+    "name": "Leopoldo Bini",
+    "email": "raul.leopoldobini@gmail.com"
+  }
+}

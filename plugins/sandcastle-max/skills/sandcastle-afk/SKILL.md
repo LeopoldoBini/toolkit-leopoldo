@@ -46,6 +46,8 @@ Running `npx @ai-hero/sandcastle init --template blank --agent claude-code` look
 
 **Fix:** the `/sandcastle-init` slash command (this plugin) bypasses the CLI and writes the files directly from templates. The templates were extracted from `node_modules/@ai-hero/sandcastle/dist/templates/blank/` and `dist/InitService.js`.
 
+**Where to grep if it changes:** `dist/InitService.js` — search for `TEMPLATES`, `AGENT_REGISTRY`, `CLAUDE_CODE_DOCKERFILE`, and `GITIGNORE` constants. The `.env.example` content per agent lives next to `AGENT_REGISTRY` entries. The interactive prompt for sandbox provider is wired in `dist/cli.js`.
+
 ### Gotcha 2 — UID mismatch between Dockerfile install and Sandcastle runtime
 
 The Sandcastle docker provider starts the container with `--user $HOST_UID:$HOST_GID` (501:20 on macOS, 1000:1000 on most Linux) so that bind-mounted host files keep correct ownership. **But** the Dockerfile's `RUN curl … claude/install.sh | bash` runs as `USER agent` (UID 1000), so installer-created files in `/home/agent/` are owned by agent, not by the host UID.
@@ -63,6 +65,8 @@ USER agent
 
 Sticky bit world-writable on `/home/agent` and direct subdirs. The host UID can now write what it needs at runtime. The `claude` binary symlink in `~/.local/bin` keeps working because it points to `~/.local/share/claude/versions/<v>` which is mode 755 from the installer.
 
+**Where to grep if it changes:** `dist/sandboxes/docker.js` — look for `process.getuid` (the line that builds `--user $hostUid:$hostGid`) and `HOME: "/home/agent"` (hardcoded env override). If a future Sandcastle release lets you customize either, this gotcha may go away. The git command that fails first is in `dist/SandboxLifecycle.js` — search for `git config --global --add safe.directory`.
+
 ### Gotcha 3 — `~/.claude.json` from the installer hangs `claude --print` silently
 
 Even after the chmod fix, the installer leaves a `/home/agent/.claude.json` config file with mode `-rw-------` (600, owner-only). When the container starts as UID 501, that file is unreadable. Claude Code reads it on startup, gets EACCES, and **hangs forever** in `--print` mode without surfacing an error. `--output-format stream-json` exits cleanly with no output (worse — looks like a successful empty run); `--output-format json` and plain text mode time out.
@@ -75,6 +79,8 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 ```
 
 Wipe the installer's owner-only state files. Claude Code will recreate them at runtime as the host UID, with usable perms.
+
+**Where to grep if it changes:** the install script lives at `https://claude.ai/install.sh` — fetch it (`curl -fsSL https://claude.ai/install.sh | less`) and search for any chmod/chown that creates `~/.claude` or `~/.claude.json`. If Anthropic later writes those files with mode 644 or 666, the wipe stops being necessary. The provider that runs `claude --print` (and silently inherits whatever it can or can't read from `$HOME`) is `dist/AgentProvider.js` — look for the `claudeCode(model, options)` factory and its `buildPrintCommand` method.
 
 ## Troubleshooting
 
@@ -121,6 +127,42 @@ Sandcastle hardcodes `--user $HOST_UID:$HOST_GID`. On macOS your UID is typicall
 | `ANTHROPIC_API_KEY` (Sandcastle default) | Production CI/CD, parallel runs that exceed Max windows, cost-tracked workloads | Pay per token (Sonnet 4.6 ~$3/MTok input, $15/MTok output) | Get key from console.anthropic.com, paste in `.sandcastle/.env` |
 
 You can mix: keep this plugin for local dev/personal AFK, swap to API key on the server for the heavier runs.
+
+## Sandcastle internals — where to grep when it breaks
+
+This plugin was built by reading `@ai-hero/sandcastle@0.5.7` source. If a later release changes behavior, the symbols below are the stable anchors to grep for. All paths are inside `node_modules/@ai-hero/sandcastle/dist/` after `bun add -d @ai-hero/sandcastle`.
+
+| File | Grep for | Why |
+|------|----------|-----|
+| `AgentProvider.js` | `claudeCode = (model, options)` | Provider factory. Confirms it does **not** validate `ANTHROPIC_API_KEY`. Its `buildPrintCommand` builds the `claude --print --verbose --output-format stream-json` invocation. |
+| `AgentProvider.js` | `AGENT_REGISTRY` | List of supported agents (claude-code, pi, codex, opencode) and their `envExample` strings. The Claude Code entry's `envExample` is what links to issue #191 — confirms maintainer's stance. |
+| `sandboxes/docker.js` | `process.getuid` | The hardcoded `--user $hostUid:$hostGid` flag — root cause of gotcha 2. |
+| `sandboxes/docker.js` | `HOME: "/home/agent"` | Hardcoded HOME env override in `startContainer` call — you can't change HOME from `main.mts`. |
+| `sandboxes/docker.js` | `worktreePath` | How bind-mounts are resolved — anchor for debugging if mount paths shift. |
+| `SandboxLifecycle.js` | `git config --global --add safe.directory` | First command that runs after container start. If gotcha 2 isn't fixed, this is the line that fails with "could not lock config file". |
+| `SandboxLifecycle.js` | `GIT_SETUP_TIMEOUT_MS` | Default 10s — explains why the manual repro times out at 30s but Sandcastle errors faster than the agent idle timeout. |
+| `Orchestrator.js` | `dangerouslySkipPermissions: true` | Hardcoded — every print run skips permission prompts. If this flips to false, `claude --print` will hang waiting for permission grants that no TTY can provide. |
+| `Orchestrator.js` | `idleTimeout` / `AgentIdleTimeoutError` | The 600s default. Adjustable via run options. The error message you see when gotcha 3 strikes. |
+| `InitService.js` | `CLAUDE_CODE_DOCKERFILE` | Reference Dockerfile string — diff against the plugin's template to see what we added (chmod + cleanup). |
+| `InitService.js` | `GITHUB_CLI_TOOLS`, `BEADS_TOOLS` | `{{BACKLOG_MANAGER_TOOLS}}` substitutions — useful if you want to integrate Beads instead of GitHub for the backlog. |
+| `InitService.js` | `GITIGNORE`, `envExampleParts` | Reference content for the files `npx sandcastle init` would generate, in case you want to add support for a new template. |
+| `templates/blank/main.mts` | (whole file) | Origin of our `main.mts` — diff to see the OAuth env wiring we added. |
+| `run.js` / `index.d.ts` | `RunOptions`, `BranchStrategy` | Public API surface. `branchStrategy` accepts `{ type: 'head' | 'merge-to-head' | 'branch', branch?: string }`. |
+
+**One-shot to find any of these in your installed version:**
+
+```bash
+find node_modules/@ai-hero/sandcastle/dist -name '*.js' \
+  -exec grep -l "<symbol-from-table>" {} +
+```
+
+**Version drift check** before debugging anything else:
+
+```bash
+cat node_modules/@ai-hero/sandcastle/package.json | grep version
+```
+
+If it's no longer 0.5.x, expect some of the above to have moved. The symbols are stable enough to grep across minor versions.
 
 ## Architecture summary
 

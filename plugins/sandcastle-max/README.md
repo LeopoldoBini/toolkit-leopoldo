@@ -153,6 +153,7 @@ sandcastle-max/
 
 ## Version history
 
+- **0.3.1** — `/sandcastle-dispatch-wave` pre-flight self-recovers missing env vars: auto-sources `scripts/claude-oauth-env.sh` if `CLAUDE_CODE_OAUTH_TOKEN` is missing, and auto-exports `GH_TOKEN=$(gh auth token)` if no GH token is set. Removes the manual setup step before invoking the dispatcher from a Claude session. Documents the single-Bash-invocation requirement (Claude Code Bash tool calls don't share env state across calls).
 - **0.3.0** — `/sandcastle-dispatch-wave` command added. `main.mts` is now env-var-driven (smoke vs AFK dispatch detected automatically). Per-issue prompt files in `.sandcastle/prompts/`. Failure isolation per Q11. Smart wave (Q12) handles first-try + retries uniformly.
 - **0.2.0** — Sandcastle-internals grep map added to skill (forward-compat debugging).
 - **0.1.0** — Initial release: `/sandcastle-init` + `sandcastle-afk` skill.

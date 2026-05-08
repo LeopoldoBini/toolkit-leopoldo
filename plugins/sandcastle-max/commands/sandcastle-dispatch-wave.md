@@ -14,19 +14,55 @@ This command implements the design decisions from the `/grill-me` round of 2026-
 - **Q11 (failure isolation)**: container-level failures don't kill siblings; env-level failures (Docker daemon, OAuth) abort the wave.
 - **Q12 (smart wave)**: a single invocation handles first-try and retries uniformly. Issues with `agent-blocked` label are skipped (need user input on the brief).
 
-## Pre-conditions (verify in parallel before doing anything)
+## Pre-conditions (verify + auto-recover before doing anything)
 
-Run these checks via Bash; report what fails and stop if any is missing:
+The dispatcher self-recovers missing env vars when possible. **All subsequent Bash steps must run inside a single shell session that inherits the recovered vars** — that's why pre-flight, brief extraction, and the launch loop are run as one Bash invocation (or chained via `&&`), not as separate Bash tool calls.
 
-- `git rev-parse --show-toplevel` — must be inside a git repo. If not, abort.
-- `[[ -f .sandcastle/main.mts ]]` — the repo must have been scaffolded with `/sandcastle-init`. If not, suggest running it first.
-- `docker info >/dev/null 2>&1` — Docker daemon must be running.
-- `[[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]]` — OAuth token must be in env. If not, suggest `source scripts/claude-oauth-env.sh`.
-- `[[ -n "$GH_TOKEN" || -n "$GITHUB_TOKEN" ]]` — GH token must be available so the container can `gh issue comment` / `gh pr create`. If not, suggest `export GH_TOKEN=$(gh auth token)`.
-- `gh repo view --json nameWithOwner --jq .nameWithOwner` — must resolve to the GH repo (config sane).
-- `docker image inspect sandcastle-max >/dev/null 2>&1` — the Docker image must exist. If not, suggest `bun run sandcastle:build`.
+Run this self-recovering pre-flight via a SINGLE Bash invocation:
 
-If any check fails, **stop**. Print actionable instructions for each missing item.
+```bash
+set -e
+
+# Hard checks — abort if any fail.
+git rev-parse --show-toplevel >/dev/null || { echo "✗ not a git repo"; exit 1; }
+[[ -f .sandcastle/main.mts ]] || { echo "✗ .sandcastle/ not scaffolded — run /sandcastle-init first"; exit 1; }
+docker info >/dev/null 2>&1 || { echo "✗ Docker daemon not running"; exit 1; }
+gh repo view --json nameWithOwner --jq .nameWithOwner >/dev/null || { echo "✗ gh repo unresolved"; exit 1; }
+docker image inspect sandcastle-max >/dev/null 2>&1 || { echo "✗ sandcastle-max image not built — run 'bun run sandcastle:build'"; exit 1; }
+
+# Auto-recover OAuth token: if missing, attempt to source the helper.
+if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+  if [[ -f scripts/claude-oauth-env.sh ]]; then
+    set +e
+    source scripts/claude-oauth-env.sh 2>&1 | tail -5
+    set -e
+  fi
+  [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] || {
+    echo "✗ CLAUDE_CODE_OAUTH_TOKEN missing and auto-source failed."
+    echo "  Try manually: source scripts/claude-oauth-env.sh"
+    echo "  On Linux/server: paste token into .sandcastle/.env (no Keychain)."
+    exit 1
+  }
+fi
+
+# Auto-recover GH token: if missing, attempt to read from gh CLI.
+if [[ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
+  if gh auth status >/dev/null 2>&1; then
+    export GH_TOKEN=$(gh auth token)
+  fi
+  [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]] || {
+    echo "✗ No GH_TOKEN/GITHUB_TOKEN and gh CLI not authenticated."
+    echo "  Try: gh auth login   (or set GH_TOKEN manually)"
+    exit 1
+  }
+fi
+
+echo "✓ pre-flight passed (oauth=present gh_token=present docker=ok image=ok)"
+```
+
+**Important for Claude (the AI executing this command):** all the steps below — dep graph reading (Step 1), preview (Step 2), per-issue preparation (Step 4), launch loop (Step 5), monitor (continuation of Step 5) — must inherit the recovered env vars. The simplest way is to chain pre-flight + read + preview into one Bash call, then chain prep + launch + monitor into another Bash call (or all into one big `bash -c`). Do NOT call Bash 12 times for 12 steps — env vars will reset between calls.
+
+If any check fails, **stop** and print the actionable instructions printed by the script itself.
 
 ## Step 1 — Read dependency graph
 

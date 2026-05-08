@@ -1,0 +1,132 @@
+# Workflow synthesis — sandcastle-max
+
+How Leo and Claude use this plugin together. **One page**, every step explicit. If something here isn't implicit in the plugin, that's a gap to fix.
+
+## Mental model in one paragraph
+
+Leo writes a PRD → breaks it into GH issues with vertical-slice agent briefs → Claude (this plugin) reads the briefs and orchestrates Docker containers, one per issue, that run Claude Code AFK against the user's Max subscription. Each container opens a PR. CI gates the PRs by tier (foundations hold for human review, verticals auto-merge on green). Leo wakes up to a wave summary; reviews foundations; merges; runs the dispatcher again for the next wave. Repeat until the MVP ships.
+
+## The four moments
+
+### Moment 1 — Setup (one-time per repo)
+
+**Leo:** `/sandcastle-init` (and follows the printed checklist: `claude setup-token`, build, smoke).
+
+**Claude (the plugin):** scaffolds `.sandcastle/` (Dockerfile with chmod 1777 + state cleanup, env-var-driven `main.mts`, prompt template, `.env.example`), `scripts/claude-oauth-env.sh` (Keychain → env, no leak), package.json scripts (`sandcastle:build`, `sandcastle:run`), `.gitignore` updates. Idempotent — refuses overwrites without `--force`.
+
+**Plugin file responsible:** `commands/sandcastle-init.md` (slash command instructions) + `templates/*` (files copied into repo) + `scripts/claude-oauth-env.sh`.
+
+**Out-of-band knowledge required:** none. The slash command's printed checklist is self-contained.
+
+---
+
+### Moment 2 — Daily AFK dispatch
+
+**Pre-conditions Leo must satisfy** (the plugin verifies these and complains if missing):
+
+```bash
+source scripts/claude-oauth-env.sh                    # OAuth token in env
+export GH_TOKEN=$(gh auth token)                      # GH API access for containers
+docker info >/dev/null                                # Docker running
+docker image inspect sandcastle-max >/dev/null        # image built
+```
+
+**Leo:** `/sandcastle-dispatch-wave`
+
+**Claude (the plugin):**
+
+1. **Pre-flight** (verifies all pre-conditions; aborts with actionable error if any fail).
+2. **Reads dep graph** — queries `gh issue list --label state/ready-for-agent`, parses each issue body for `## Blocked by`, checks dep status via `gh issue view N --json closedAt`, checks for in-flight PRs.
+3. **Buckets issues**: eligible (deps met, no PR) / blocked (waiting on upstream) / skipped (`agent-blocked` label).
+4. **Shows preview** — formatted table of all three buckets. Marks retries (issues with `agent-stuck`/`agent-crashed` labels but no PR).
+5. **Asks** `[y/N/select <list>]`.
+6. **On yes**: for each issue in the launch set:
+   - Extracts the latest `## Agent Brief` comment via `gh api .../comments`.
+   - Composes per-issue prompt at `.sandcastle/prompts/issue-N.md` using a fixed template (issue context + brief inlined + reading order: CLAUDE.md → brief → docs/phase1-decisions.md if linked → codebase + completion signal contract).
+   - Pre-deletes any stale `agent/issue-N` branch (local + remote) to enable retries.
+   - Launches Sandcastle in a background subshell with `SANDCASTLE_ISSUE_NUMBER`, `SANDCASTLE_BRANCH`, `SANDCASTLE_PROMPT_FILE` env vars.
+7. **Monitors** — polls Docker every 30s for daemon health (Q11 wave-fatal); polls PIDs for completion; parses logs for `<promise>COMPLETE</promise>` / `<promise>BLOCKED</promise>` / `AgentIdleTimeoutError`.
+8. **Applies outcomes**:
+   - COMPLETE + PR opened → ✓
+   - BLOCKED → (agent already commented + labeled, just record)
+   - idle timeout → label `agent-stuck` + comment with log path
+   - crash → label `agent-crashed` + comment with log path
+9. **Prints final report** + saves `.sandcastle/wave-reports/<timestamp>.json`.
+
+**Plugin file responsible:** `commands/sandcastle-dispatch-wave.md` + `templates/main.mts` (env-var-driven runtime).
+
+**Out-of-band knowledge required (PROJECT-LOCAL but documented):**
+- The project must use `engineering-workflow >= 2.1.0` for the single-brief invariant. The dispatcher's preflight warns if multiple briefs are detected. *(Documented in README + dispatcher command.)*
+- The project's CI must understand the `afk-agent-pr` label that the agent applies to its PR. *(Documented in dispatcher prompt template + README.)*
+
+---
+
+### Moment 3 — CI gates (project-local, NOT in this plugin)
+
+The agent's PR has the `afk-agent-pr` label. Project CI workflows decide automerge:
+
+- `.github/workflows/afk-checks.yml` — typecheck + tests + (eventually) Playwright. Single aggregator job `all-checks-passed`.
+- `.github/workflows/afk-automerge.yml` — on `workflow_run` of `afk-checks` success, evaluates Q8 tier rules:
+  - Linked issue is `slice/foundation` → hold for human review (comment on PR explaining).
+  - Linked issue has `agent-blocked` label or PR body has `<promise>BLOCKED</promise>` → hold.
+  - PR body has unchecked acceptance criteria checkboxes → hold.
+  - All clear → `gh pr merge --squash --delete-branch`.
+
+**This plugin does NOT generate these workflows.** The plugin's responsibility ends at "PR opened with `afk-agent-pr` label". Each project owns its CI. *(Explicitly stated in README + WORKFLOW.md.)*
+
+A reference implementation lives in `monitor_contrataciones/.github/workflows/` if you want to copy it.
+
+---
+
+### Moment 4 — Failure & recovery
+
+When a wave finishes with mixed outcomes, Leo just runs `/sandcastle-dispatch-wave` again (Q12 smart wave): the dispatcher detects:
+- Issues with PR open → in flight, skip.
+- Issues with `agent-stuck` / `agent-crashed` labels but no PR → re-include in this wave (retries).
+- Issues with `agent-blocked` → skip until Leo edits the brief and removes the label (per Q5: edit the existing `## Agent Brief` comment in place).
+
+When a single retry fails repeatedly, the skill `sandcastle-afk` is the troubleshooting reference — three gotchas + Sandcastle internals grep map for forward-compat debugging.
+
+**Plugin file responsible:** `skills/sandcastle-afk/SKILL.md` + the dispatcher's monitor logic (in `commands/sandcastle-dispatch-wave.md`).
+
+---
+
+## Self-containment audit
+
+Per Leo's request: is the workflow above truly implicit in the plugin, or does it rely on shared knowledge between Leo and Claude that lives outside the plugin?
+
+| Concern | Implicit in plugin? | Where |
+|---|---|---|
+| OAuth token wiring (Keychain → env → container) | ✓ | `scripts/claude-oauth-env.sh` + `templates/main.mts` + `commands/sandcastle-init.md` checklist |
+| The three Sandcastle gotchas | ✓ | `skills/sandcastle-afk/SKILL.md` |
+| Dockerfile constraints (`chmod 1777`, `.claude.json` cleanup) | ✓ | `templates/Dockerfile` + skill explanation |
+| Smoke vs AFK mode switching (env vars) | ✓ | `templates/main.mts` comments + `skills/sandcastle-afk/SKILL.md` "Two operating modes" |
+| Brief is the contract (single per issue, last wins) | ✓ | `commands/sandcastle-dispatch-wave.md` step 4.1 — extracts `last(.body | contains "## Agent Brief")`. Skill's "How this plugin chains with engineering-workflow" section explains the dependency. |
+| Dependency graph reading (`## Blocked by` parsing) | ✓ | `commands/sandcastle-dispatch-wave.md` step 1 |
+| Wave preview + confirmation | ✓ | `commands/sandcastle-dispatch-wave.md` step 2-3 |
+| Failure isolation (container vs env) | ✓ | `commands/sandcastle-dispatch-wave.md` step 5 monitor logic |
+| Retry semantics (smart wave) | ✓ | `commands/sandcastle-dispatch-wave.md` step 1 + step 5 (label-based detection) + README "Re-runs (smart wave)" |
+| Agent contract (prompt template, COMPLETE/BLOCKED tokens, PR + comment requirements) | ✓ | `commands/sandcastle-dispatch-wave.md` "Per-issue prompt.md template" |
+| `afk-agent-pr` label convention | ✓ | Mentioned in dispatcher prompt template; consumer documented in this WORKFLOW.md |
+| CI workflows themselves | ✗ (intentional) | Plugin explicitly says CI is project-local. Reference implementation in `monitor_contrataciones`. |
+| `engineering-workflow >= 2.1.0` dependency | ✓ | README + skill "How this plugin chains with engineering-workflow" |
+| `docs/phase1-decisions.md` (or any project-specific decisions doc) | △ | Dispatcher prompt template references it but acknowledges projects may not have one. The agent reads CLAUDE.md unconditionally; the decisions doc only if the brief mentions a P-anchor. |
+| Pre-condition env vars (`CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN`) | ✓ | Dispatcher pre-flight + scaffolded `.env.example` |
+| Cleanup of stale agent branches before retry | ✓ | `commands/sandcastle-dispatch-wave.md` step 4.3 |
+
+### Gaps identified (and acceptable)
+
+1. **CI workflows are NOT generated.** Plugin draws a clear line: PR creation is the boundary. Each project's CI is its own concern. Reference implementation in `monitor_contrataciones/.github/workflows/` for projects to copy.
+2. **`docs/phase1-decisions.md` path is project-local.** Dispatcher's prompt template hard-codes `docs/phase1-decisions.md` because Leo's first project uses it; for projects that name it differently (e.g. `docs/decisions/phase-2.md`), the prompt template will harmlessly tell the agent to read a non-existent file. Acceptable cost: the agent is told to skip if not present.
+3. **Wave size is unbounded** (cap is the natural max from dep graph). If quota becomes a real bottleneck, the `--max-parallel` flag exists. Default behavior optimizes for wall-clock, not quota.
+
+### Conclusion
+
+The plugin is self-contained for the AFK execution domain. The two intentional out-of-plugin dependencies (engineering-workflow plugin + project-local CI) are explicitly documented and bounded. Leo can hand this plugin to a future Claude session with no out-of-band briefing and the future Claude will know:
+
+- How to scaffold (`/sandcastle-init`).
+- How to dispatch (`/sandcastle-dispatch-wave`).
+- How to debug (`skill: sandcastle-afk` with the gotchas + grep map).
+- What the plugin does NOT do (CI, PR review, brief authoring) and where those responsibilities live.
+
+If a future grilling session adds new decisions (Q13+), they should be encoded as updates to `commands/sandcastle-dispatch-wave.md` + bumping the plugin version, NOT as tribal knowledge in conversations.

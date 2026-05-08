@@ -9,8 +9,8 @@
   "plugins": [
     {
       "name": "engineering-workflow",
-      "description": "Unified engineering workflow (10 skills + /init-workflow command). The full pipeline: /grill-with-docs and /context-bootstrap (alignment + shared language), /to-prd, /to-issues, /agent-brief, /triage (backlog flow), /tdd-vertical, /diagnose, /zoom-out, /deep-modules (disciplined coding). Run /init-workflow once per repo to seed the pipeline order in CLAUDE.md.",
-      "version": "2.0.0",
+      "description": "Unified engineering workflow (10 skills + /init-workflow command). The full pipeline: /grill-with-docs and /context-bootstrap (alignment + shared language), /to-prd, /to-issues, /agent-brief, /triage (backlog flow), /tdd-vertical, /diagnose, /zoom-out, /deep-modules (disciplined coding). Run /init-workflow once per repo to seed the pipeline order in CLAUDE.md. v2.1.0: single-brief invariant — /triage and /agent-brief now edit the existing brief comment instead of creating duplicates.",
+      "version": "2.1.0",
       "author": { "name": "Leopoldo Bini" },
       "source": "./plugins/engineering-workflow",
       "category": "engineering"

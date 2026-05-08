@@ -69,8 +69,8 @@ Show counts and a one-line summary per issue. Let the maintainer pick.
 4. **Grill (if needed).** If the issue needs fleshing out, run a `/grill-with-docs` session.
 
 5. **Apply the outcome:**
-   - `ready-for-agent` — post an agent brief comment using the `/agent-brief` skill.
-   - `ready-for-human` — same structure as an agent brief, but note why it can't be delegated (judgment calls, external access, design decisions, manual testing).
+   - `ready-for-agent` — post (or edit) an agent brief comment using the `/agent-brief` skill. **Single-brief invariant:** an issue must have exactly one `## Agent Brief` comment at any time. If one already exists, **edit that comment in place** with `gh issue comment --edit-last` or `gh api PATCH /repos/{owner}/{repo}/issues/comments/{id}` — do not create a second one. The brief is the contract; multiple briefs create ambiguity for downstream tooling that consumes them (e.g. `/sandcastle-dispatch-wave`).
+   - `ready-for-human` — same structure as an agent brief, but note why it can't be delegated (judgment calls, external access, design decisions, manual testing). Same single-comment invariant applies.
    - `needs-info` — post triage notes (template below).
    - `wontfix` (bug) — polite explanation, then close.
    - `wontfix` (enhancement) — write to `.out-of-scope/`, link to it from a comment, then close ([OUT-OF-SCOPE.md](OUT-OF-SCOPE.md)).

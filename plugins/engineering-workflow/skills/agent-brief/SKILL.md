@@ -39,6 +39,18 @@ The agent needs to know when it's done. Every brief must have concrete, testable
 
 State what is out of scope. This prevents the agent from gold-plating or making assumptions about adjacent features.
 
+### Single brief per issue (edit, do not duplicate)
+
+An issue must have **exactly one** `## Agent Brief` comment at any time. The brief is the contract — multiple briefs create ambiguity about which one is "live" and break tooling that consumes them programmatically.
+
+When the brief needs to be updated (refining acceptance criteria, adding cross-cutting decisions, fixing ambiguity surfaced during grilling):
+
+- **Edit the existing comment in place.** Use `gh issue comment <N> --edit-last` if it was the most recent comment, or `gh api --method PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}` for an arbitrary comment by ID.
+- **Do NOT add a new `## Agent Brief` comment** alongside the old one.
+- If you find an issue that already has multiple `## Agent Brief` comments (legacy state), reconcile: keep the latest, delete the older ones (`gh api --method DELETE /repos/{owner}/{repo}/issues/comments/{old_id}`), then proceed with the edit.
+
+This invariant is consumed by downstream tooling (e.g. `/sandcastle-dispatch-wave` reads the latest `## Agent Brief` comment as the contract). Two briefs == two contracts == undefined behavior.
+
 ## Template
 
 ```markdown

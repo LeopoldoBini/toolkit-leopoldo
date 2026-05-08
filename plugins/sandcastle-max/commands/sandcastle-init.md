@@ -91,6 +91,8 @@ Add (append, do not duplicate) these lines to `<repo>/.gitignore`:
 ```
 .sandcastle/.env
 .sandcastle/logs/
+.sandcastle/prompts/
+.sandcastle/wave-reports/
 .sandcastle/worktrees/
 ```
 
@@ -103,18 +105,23 @@ Output a short, actionable checklist to the user:
 ```
 Sandcastle scaffolded.
 
-Next steps:
+Next steps (smoke test the setup):
 1. (one-time) claude setup-token   ← skip if Keychain entry already exists
 2. source scripts/claude-oauth-env.sh
 3. bun run sandcastle:build         ← takes 1-3 min first time (downloads node:22 + Bun + gh CLI + Claude Code)
 4. bun run sandcastle:run           ← runs the smoke prompt in .sandcastle/prompt.md
+                                     should print <promise>COMPLETE</promise>
 
-To use it for real AFK execution:
-- Edit .sandcastle/prompt.md with the agent brief.
-- In .sandcastle/main.mts, change branchStrategy to { type: 'branch', branch: 'agent/issue-N' } so Sandcastle creates a dedicated branch for the agent's commits.
-- Pass GH_TOKEN (e.g. via .sandcastle/.env) so the agent can `gh issue comment` and `gh pr create`.
+For real AFK execution (after smoke passes):
+- Use the /sandcastle-dispatch-wave slash command — it reads the GH issue
+  dependency graph, computes the next wave, and launches one Docker
+  container per eligible issue in parallel. main.mts switches to AFK
+  mode automatically when the dispatcher sets SANDCASTLE_ISSUE_NUMBER.
+- Pre-conditions: export GH_TOKEN=$(gh auth token) so containers can
+  `gh issue comment` and `gh pr create`.
 
-Skill /sandcastle-afk has the full troubleshooting guide if anything hangs.
+Skill /sandcastle-afk has the full troubleshooting guide + the two-mode
+explanation (smoke vs AFK dispatch) if anything hangs.
 ```
 
 ## Important notes

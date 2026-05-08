@@ -36,6 +36,66 @@ bun run sandcastle:run          # runs the smoke prompt
 
 If the smoke run completes with `<promise>COMPLETE</promise>` in the output, the setup works. If it hangs with `Agent idle for N minutes` and times out at 600s, see Troubleshooting.
 
+## Two operating modes
+
+`main.mts` (this plugin's template) reads env vars to decide between two modes:
+
+### Mode 1: smoke / dev (no env overrides)
+
+```bash
+source scripts/claude-oauth-env.sh
+bun run sandcastle:run
+```
+
+- `branchStrategy: { type: 'head' }` — read-only run, no commits.
+- `promptFile: .sandcastle/prompt.md` — the smoke template.
+- Use this to validate auth + Docker pipeline. **Always run smoke after `sandcastle:build` to catch broken state early.**
+
+### Mode 2: AFK dispatch (driven by `/sandcastle-dispatch-wave`)
+
+```
+/sandcastle-dispatch-wave
+```
+
+The dispatcher sets these env vars per launch:
+
+```
+SANDCASTLE_ISSUE_NUMBER=2
+SANDCASTLE_BRANCH=agent/issue-2
+SANDCASTLE_PROMPT_FILE=./.sandcastle/prompts/issue-2.md
+```
+
+`main.mts` detects them and switches to:
+- `branchStrategy: { type: 'branch', branch: 'agent/issue-N' }` — Sandcastle creates a dedicated branch from `main`, the agent commits to it, `gh pr create` opens a PR against `main`.
+- `promptFile` = the per-issue prompt with the brief inlined.
+
+**Why env vars and not file-rewrite:** the dispatcher running multiple containers in parallel can't safely mutate a shared `main.mts` per launch. Env vars per subshell isolate the dispatch parameters cleanly. See the `/sandcastle-dispatch-wave` command for the full env-var schema.
+
+## How this plugin chains with engineering-workflow
+
+This plugin is the **execution layer**. The **brief authoring layer** is the `engineering-workflow` plugin (>=2.1.0), which lives in the same `toolkit-leopoldo` marketplace. The chain:
+
+```
+PRD               → /to-prd       (engineering-workflow)
+Issues            → /to-issues    (engineering-workflow)
+Briefs            → /triage + /agent-brief
+                    Single-brief invariant: edit, don't duplicate.
+                    Last `## Agent Brief` comment is the contract.
+                    (engineering-workflow >=2.1.0)
+AFK execution     → /sandcastle-dispatch-wave
+                    Reads the latest brief comment per issue,
+                    inlines into per-issue prompt.md,
+                    launches one Docker container per eligible issue.
+                    (this plugin)
+PR review         → CI workflows (.github/workflows/afk-automerge.yml)
+                    Auto-merge VS* on green, hold F* for human review.
+                    (project-local — not a plugin)
+```
+
+The dispatcher **depends on the single-brief invariant**. If the project uses an older `engineering-workflow` (<2.1.0), `/triage` may have created multiple `## Agent Brief` comments per issue, and the dispatcher's "last wins" rule can be inconsistent.
+
+**Verification:** the dispatcher's pre-flight prints a warning if it finds >1 brief on any issue in the launch set, and refuses to launch unless `--force` is passed. The remediation is to consolidate manually (delete older comments) and the dispatcher will work correctly on the next invocation.
+
 ## The three gotchas
 
 These are the non-obvious failure modes. Knowing them up front saves hours of debugging.

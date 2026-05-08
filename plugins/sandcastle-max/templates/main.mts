@@ -10,9 +10,23 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 // runtime. The container has no Keychain, so the env var is the only auth
 // path. See the sandcastle-afk skill for full background on issue #191.
 //
-// Source the OAuth env helper before running:
-//   source scripts/claude-oauth-env.sh
-//   bun run sandcastle:run     # or: npx tsx .sandcastle/main.mts
+// Two operating modes:
+//
+//  1. SMOKE / DEV (default — no env overrides):
+//       branchStrategy = { type: 'head' } → no commits, read-only run
+//       promptFile     = ./.sandcastle/prompt.md (smoke template)
+//     Source the OAuth env helper and run:
+//       source scripts/claude-oauth-env.sh
+//       bun run sandcastle:run
+//
+//  2. AFK DISPATCH (driven by /sandcastle-dispatch-wave):
+//       The dispatcher sets env vars before invoking this script:
+//         SANDCASTLE_ISSUE_NUMBER  e.g. "2"
+//         SANDCASTLE_BRANCH        e.g. "agent/issue-2"
+//         SANDCASTLE_PROMPT_FILE   e.g. "./.sandcastle/prompts/issue-2.md"
+//       branchStrategy switches to { type: 'branch', branch: $BRANCH } so
+//       Sandcastle creates a dedicated branch for the agent's commits and
+//       a PR can be opened against it.
 //
 // Optional GH_TOKEN: pass through if present so the agent can `gh issue
 // comment` and `gh pr create` from inside the container.
@@ -34,6 +48,27 @@ if (ghToken) {
   agentEnv.GH_TOKEN = ghToken;
 }
 
+// Per-dispatch overrides (set by /sandcastle-dispatch-wave).
+const issueNumber = process.env.SANDCASTLE_ISSUE_NUMBER;
+const branchName = process.env.SANDCASTLE_BRANCH;
+const promptFile =
+  process.env.SANDCASTLE_PROMPT_FILE ?? "./.sandcastle/prompt.md";
+
+const branchStrategy =
+  branchName && branchName !== "head"
+    ? ({ type: "branch", branch: branchName } as const)
+    : ({ type: "head" } as const);
+
+if (issueNumber) {
+  console.log(
+    `[sandcastle-max] AFK dispatch — issue #${issueNumber}, branch=${branchName ?? "(head)"}, prompt=${promptFile}`,
+  );
+} else {
+  console.log(
+    `[sandcastle-max] smoke / dev mode — branch=head, prompt=${promptFile}`,
+  );
+}
+
 await run({
   agent: claudeCode("claude-sonnet-4-6", {
     env: agentEnv,
@@ -41,9 +76,6 @@ await run({
   sandbox: docker({
     imageName: "sandcastle-max",
   }),
-  promptFile: "./.sandcastle/prompt.md",
-  // For real AFK runs use { type: 'branch', branch: 'agent/issue-N' } so the
-  // agent works on a dedicated branch and Sandcastle can collect commits
-  // for a PR. 'head' is fine for read-only smoke tests.
-  branchStrategy: { type: "head" },
+  promptFile,
+  branchStrategy,
 });

@@ -51,7 +51,7 @@ Workaround for Sandcastle [issue #191](https://github.com/mattpocock/sandcastle/
 
 - **`/sandcastle-init`** — scaffolds `.sandcastle/` in any repo: Dockerfile (with chmod 1777 fix + Claude installer state cleanup), env-var-driven `main.mts`, prompt template, `.env.example`, `scripts/claude-oauth-env.sh` (Keychain → env, no leak), package.json scripts, `.gitignore` updates. **Idempotent** — refuses to overwrite without `--force`.
 
-- **`/sandcastle-dispatch-wave`** *(v0.3.0)* — wave-based AFK dispatcher. Reads the GH issue dependency graph (parsing `## Blocked by` from issue bodies), detects eligible issues (`state/ready-for-agent` + all deps closed + no open PR), shows preview, asks confirmation, then launches one Docker container per eligible issue in parallel. Each container gets its own per-issue `prompt.md` with the brief inlined. Failure isolation: a single container failing (idle, BLOCKED, crash) doesn't abort siblings, but env-level failures (Docker daemon, OAuth) abort the entire wave.
+- **`/sandcastle-dispatch-wave`** *(v0.3.1)* — wave-based AFK dispatcher. Reads the GH issue dependency graph (parsing `## Blocked by` from issue bodies), detects eligible issues (label `ready-for-agent` o `state/ready-for-agent` + all deps closed + no open PR), shows preview, asks confirmation, then launches one Docker container per eligible issue in parallel. Each container gets its own per-issue `prompt.md` with the brief inlined. Failure isolation: a single container failing (idle, BLOCKED, crash) doesn't abort siblings, but env-level failures (Docker daemon, OAuth) abort the entire wave.
 
 ### Skill
 

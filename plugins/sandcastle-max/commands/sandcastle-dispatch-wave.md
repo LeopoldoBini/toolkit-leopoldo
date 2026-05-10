@@ -69,9 +69,11 @@ If any check fails, **stop** and print the actionable instructions printed by th
 Query the GH issue tracker for issues that are ready for agent work:
 
 ```bash
+# Acepta ambas convenciones de label: flat (`ready-for-agent`) y namespaced (`state/ready-for-agent`).
+# La sintaxis comma-OR del search de GitHub matchea cualquiera de los dos labels en el mismo qualifier.
 gh issue list \
   --state open \
-  --label state/ready-for-agent \
+  --search 'label:"ready-for-agent","state/ready-for-agent"' \
   --json number,title,body,labels \
   --limit 100
 ```

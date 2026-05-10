@@ -36,7 +36,7 @@ docker image inspect sandcastle-max >/dev/null        # image built
 **Claude (the plugin):**
 
 1. **Pre-flight** (verifies all pre-conditions; aborts with actionable error if any fail).
-2. **Reads dep graph** — queries `gh issue list --label state/ready-for-agent`, parses each issue body for `## Blocked by`, checks dep status via `gh issue view N --json closedAt`, checks for in-flight PRs.
+2. **Reads dep graph** — queries `gh issue list --search 'label:"ready-for-agent","state/ready-for-agent"'` (acepta ambas convenciones), parses each issue body for `## Blocked by`, checks dep status via `gh issue view N --json closedAt`, checks for in-flight PRs.
 3. **Buckets issues**: eligible (deps met, no PR) / blocked (waiting on upstream) / skipped (`agent-blocked` label).
 4. **Shows preview** — formatted table of all three buckets. Marks retries (issues with `agent-stuck`/`agent-crashed` labels but no PR).
 5. **Asks** `[y/N/select <list>]`.

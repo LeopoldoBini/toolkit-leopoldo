@@ -1,6 +1,6 @@
 {
   "name": "sandcastle-max",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Run @ai-hero/sandcastle (AFK Claude Code agents in Docker) using your Claude Max subscription via CLAUDE_CODE_OAUTH_TOKEN instead of paying for ANTHROPIC_API_KEY tokens. Workaround for Sandcastle issue #191 (wontfix). Slash commands: /sandcastle-init scaffolds .sandcastle/ in any repo (Dockerfile with chmod 1777 + state cleanup, OAuth-aware main.mts, package.json scripts, Keychain→env helper); /sandcastle-dispatch-wave reads the GH issue dependency graph, computes the next AFK wave, and launches one container per eligible issue in parallel; /afk-pr-triage closes the loop by evaluating each open `afk-agent-pr` PR against its original Agent Brief, running tsc/tests in an isolated worktree, parsing acceptance criteria strictly, and classifying into AUTO-MERGE / HOLD-FOR-REVIEW / BLOCK before asking for confirmation. Skill sandcastle-afk documents the three non-obvious gotchas (interactive init wizard, UID mismatch, .claude.json perm cleanup), the OAuth wiring, and a Sandcastle-internals grep map for forward-compat debugging.",
   "author": {
     "name": "Leopoldo Bini",

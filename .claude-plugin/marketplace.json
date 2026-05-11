@@ -24,6 +24,22 @@
       "category": "alignment"
     },
     {
+      "name": "memory-flow",
+      "description": "CLAUDE.md + MEMORY.md flow: /revisar_memoria audita y detecta entradas para graduar; /actualizar_memoria implementa las recomendaciones. Incluye agent claude-memory-auditor para auditorías exhaustivas. Alineado con la política de 3 artefactos (CLAUDE.md = arquitectura, MEMORY.md = aprendizajes sesionales, CONTEXT.md = vocabulario de dominio).",
+      "version": "1.0.0",
+      "author": { "name": "Leopoldo Bini" },
+      "source": "./plugins/memory-flow",
+      "category": "productivity"
+    },
+    {
+      "name": "review-flow",
+      "description": "Checkpoints pre y post ejecución: /analizar verifica comprensión antes de ejecutar (ideal para dictados por voz o instrucciones ambiguas); /revisar_trabajo aplica revisión crítica post-implementación. Incluye agent revisor_de_trabajo para análisis exhaustivos sin modificar código.",
+      "version": "1.0.0",
+      "author": { "name": "Leopoldo Bini" },
+      "source": "./plugins/review-flow",
+      "category": "productivity"
+    },
+    {
       "name": "response-modes",
       "description": "Optional output styles for response tone/format. Caveman: ultra-terse, drops filler. No-TLDR: overrides the always-on TL;DR rule for fluid chat. Toggle via /output-style or settings.",
       "version": "1.0.0",

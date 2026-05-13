@@ -15,13 +15,13 @@ Work from whatever is already in the conversation context. If the user passes an
 
 ### 2. Explore the codebase (optional)
 
-If you haven't already explored the codebase, do so to understand the current state. Issue titles and descriptions should use the project's `CONTEXT.md` vocabulary, and respect ADRs in the area you're touching.
+If you have not already explored the codebase, do so to understand the current state of the code. Issue titles and descriptions should use the project's `CONTEXT.md` vocabulary, and respect ADRs in the area you're touching.
 
 ### 3. Draft vertical slices
 
 Break the plan into **tracer bullet** issues. Each issue is a thin vertical slice that cuts through ALL integration layers end-to-end, NOT a horizontal slice of one layer.
 
-Slices may be 'HITL' or 'AFK'. HITL slices require human interaction (architectural decision, design review). AFK slices can be implemented and merged without human interaction. Prefer AFK over HITL where possible.
+Slices may be 'HITL' or 'AFK'. HITL slices require human interaction, such as an architectural decision or a design review. AFK slices can be implemented and merged without human interaction. Prefer AFK over HITL where possible.
 
 <vertical-slice-rules>
 - Each slice delivers a narrow but COMPLETE path through every layer (schema, API, UI, tests)
@@ -61,6 +61,8 @@ A reference to the parent issue (if the source was an existing issue, otherwise 
 ## What to build
 
 A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation.
+
+Avoid specific file paths or code snippets — they go stale fast. Exception: if a previous exploration (prototype, spike, REPL session) produced a snippet that encodes a decision more precisely than prose can — state machine, reducer, schema, type shape — inline it here and note briefly where it came from. Trim to the decision-rich parts; not a working demo, just the important bits.
 
 ## Acceptance criteria
 

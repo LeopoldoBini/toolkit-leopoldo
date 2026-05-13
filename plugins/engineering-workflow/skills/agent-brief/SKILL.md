@@ -11,7 +11,7 @@ A structured spec posted on an issue (or handed to a scheduled agent) when work 
 
 ### Durability over precision
 
-The brief may sit unused for days or weeks. The codebase will change. Write it so it stays useful even as files are renamed, moved, or refactored.
+The issue may sit in `ready-for-agent` for days or weeks. The codebase will change in the meantime. Write the brief so it stays useful even as files are renamed, moved, or refactored.
 
 - **Do** describe interfaces, types, and behavioral contracts
 - **Do** name specific types, function signatures, or config shapes that the agent should look for or modify
@@ -30,7 +30,7 @@ Describe **what** the system should do, not **how** to implement it. The agent w
 
 ### Complete acceptance criteria
 
-The agent needs to know when it's done. Every brief must have concrete, testable acceptance criteria. Each criterion should be independently verifiable.
+The agent needs to know when it's done. Every agent brief must have concrete, testable acceptance criteria. Each criterion should be independently verifiable.
 
 - **Good:** "Running `gh issue list --label needs-triage` returns issues that have been through initial classification"
 - **Bad:** "Triage should work correctly"
@@ -130,6 +130,8 @@ and append "..." to indicate truncation.
 **Current behavior:**
 When a feature request is rejected, the issue is closed with a `wontfix` label
 and a comment. There is no persistent record of the decision or reasoning.
+Future similar requests require the maintainer to recall or search for the
+prior discussion.
 
 **Desired behavior:**
 Rejected feature requests should be documented in `.out-of-scope/<concept>.md`
@@ -176,7 +178,7 @@ The function around line 150 has the issue.
 
 This is bad because:
 - No category
-- Vague description
+- Vague description ("the triage thing is broken")
 - References file paths and line numbers that will go stale
 - No acceptance criteria
 - No scope boundaries

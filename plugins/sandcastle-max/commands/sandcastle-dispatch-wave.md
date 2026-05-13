@@ -58,6 +58,27 @@ if [[ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
 fi
 
 echo "✓ pre-flight passed (oauth=present gh_token=present docker=ok image=ok)"
+
+# Detectar base branch (HEAD donde estamos parados) y slug para naming.
+# Soporta feature branches y worktrees — el dispatch parte desde HEAD y los
+# PRs se abren contra esa misma branch (no hardcoded a main).
+export SANDCASTLE_BASE_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+export SANDCASTLE_BASE_BRANCH_SLUG=$(echo "$SANDCASTLE_BASE_BRANCH" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
+echo "✓ base branch detected: $SANDCASTLE_BASE_BRANCH (slug: $SANDCASTLE_BASE_BRANCH_SLUG)"
+
+# Warning si hay otro worktree del mismo repo con PIDs vivos en .sandcastle/logs/
+# (puede indicar dispatch simultáneo, riesgo de colisión en branches/PRs).
+GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
+OTHER_WORKTREES=$(git worktree list --porcelain | awk '/^worktree /{print $2}' | grep -v "^$(git rev-parse --show-toplevel)$" || true)
+if [[ -n "$OTHER_WORKTREES" ]]; then
+  for wt in $OTHER_WORKTREES; do
+    if ls "$wt/.sandcastle/logs/issue-"*.pid 2>/dev/null | head -1 >/dev/null; then
+      echo "⚠ WARNING: worktree $wt has active dispatch PIDs in .sandcastle/logs/"
+      echo "  Two dispatches in parallel on the same repo can collide on branch names"
+      echo "  if both target the same issue. Consider waiting or using --issues to disambiguate."
+    fi
+  done
+fi
 ```
 
 **Important for Claude (the AI executing this command):** all the steps below — dep graph reading (Step 1), preview (Step 2), per-issue preparation (Step 4), launch loop (Step 5), monitor (continuation of Step 5) — must inherit the recovered env vars. The simplest way is to chain pre-flight + read + preview into one Bash call, then chain prep + launch + monitor into another Bash call (or all into one big `bash -c`). Do NOT call Bash 12 times for 12 steps — env vars will reset between calls.
@@ -133,14 +154,15 @@ For each issue in the launch set, do these BEFORE launching anything:
 
 2. **Compose `prompt.md` for this issue.** Write to `.sandcastle/prompts/issue-N.md` using the template below. Mkdir `-p` `.sandcastle/prompts/` if needed.
 
-3. **Pre-create the branch base.** Determine the base branch (default: `main`). Verify locally:
+3. **Verify base branch is up to date.** The base branch was detected in pre-flight (`$SANDCASTLE_BASE_BRANCH` — whatever HEAD pointed at when dispatch was invoked, supports feature branches and worktrees). Fetch its remote tip:
    ```bash
-   git fetch origin main
+   git fetch origin "$SANDCASTLE_BASE_BRANCH"
    ```
-   Sandcastle will create `agent/issue-N` from HEAD inside the container. If `agent/issue-N` already exists locally OR remotely, **delete it first** (this is a retry path):
+   Sandcastle will create `agent/${SANDCASTLE_BASE_BRANCH_SLUG}/issue-${N}` from HEAD inside the container (HEAD = the base branch you're on). If that branch already exists locally OR remotely, **delete it first** (this is a retry path):
    ```bash
-   git branch -D agent/issue-$N 2>/dev/null || true
-   git push origin --delete agent/issue-$N 2>/dev/null || true
+   AGENT_BRANCH="agent/${SANDCASTLE_BASE_BRANCH_SLUG}/issue-$N"
+   git branch -D "$AGENT_BRANCH" 2>/dev/null || true
+   git push origin --delete "$AGENT_BRANCH" 2>/dev/null || true
    ```
 
 ### Per-issue `prompt.md` template
@@ -152,8 +174,8 @@ You are an AFK Claude Code agent working on a GitHub issue inside a Sandcastle D
 
 - **Repo:** {{REPO}}
 - **Issue:** #{{N}} — {{TITLE}}
-- **Branch:** {{BRANCH}} (Sandcastle created this from main)
-- **Base for PR:** main
+- **Branch:** {{BRANCH}} (Sandcastle created this from `{{BASE_BRANCH}}`)
+- **Base for PR:** {{BASE_BRANCH}}
 
 ## Your contract
 
@@ -186,7 +208,7 @@ issue body and discussion are context only — this brief is the contract.
 4. Open a PR:
    ```bash
    gh pr create \
-     --base main \
+     --base {{BASE_BRANCH}} \
      --head {{BRANCH}} \
      --title "feat(#{{N}}): <one-line summary>" \
      --body "Closes #{{N}}.
@@ -222,16 +244,17 @@ End your run with EXACTLY one of these tokens. The dispatcher reads them to dete
 
 - Do not edit files unrelated to the contract.
 - Do not modify CI workflows or repo-wide config unless the brief explicitly asks.
-- Do not push to `main` directly — only to `{{BRANCH}}`.
+- Do not push to `{{BASE_BRANCH}}` directly — only to `{{BRANCH}}`.
 - Do not skip tests with `--no-verify` or `it.skip()` to make CI pass.
 - Do not invent API endpoints or types not described in the brief or implied by `CONTEXT.md`.
 ```
 
 When generating this file, substitute:
-- `{{REPO}}` → `Cuenta-Norte/monitor-contrataciones` (or whatever `gh repo view` resolves to)
+- `{{REPO}}` → whatever `gh repo view --json nameWithOwner --jq .nameWithOwner` resolves to
 - `{{N}}` → issue number
 - `{{TITLE}}` → issue title from the GH API
-- `{{BRANCH}}` → `agent/issue-{{N}}`
+- `{{BRANCH}}` → `agent/${SANDCASTLE_BASE_BRANCH_SLUG}/issue-${N}` (namespaced by base branch to avoid collisions across worktrees)
+- `{{BASE_BRANCH}}` → `$SANDCASTLE_BASE_BRANCH` (detected in pre-flight; supports feature branches)
 - `{{BRIEF_INLINE}}` → the entire body of the latest `## Agent Brief` comment
 
 ## Step 5 — Launch in parallel
@@ -242,11 +265,12 @@ For each issue in the launch set, kick off a background process. Use Bash subshe
 mkdir -p .sandcastle/logs
 for N in $LAUNCH_SET; do
   ISSUE_PROMPT=".sandcastle/prompts/issue-${N}.md"
-  ISSUE_BRANCH="agent/issue-${N}"
+  ISSUE_BRANCH="agent/${SANDCASTLE_BASE_BRANCH_SLUG}/issue-${N}"
   LOG=".sandcastle/logs/issue-${N}-$(date +%Y%m%d-%H%M%S).log"
   (
     SANDCASTLE_ISSUE_NUMBER="$N" \
     SANDCASTLE_BRANCH="$ISSUE_BRANCH" \
+    SANDCASTLE_BASE_BRANCH="$SANDCASTLE_BASE_BRANCH" \
     SANDCASTLE_PROMPT_FILE="$ISSUE_PROMPT" \
       bunx tsx .sandcastle/main.mts > "$LOG" 2>&1 &
     echo $! > ".sandcastle/logs/issue-${N}.pid"

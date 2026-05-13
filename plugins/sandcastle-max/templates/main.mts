@@ -22,11 +22,19 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 //  2. AFK DISPATCH (driven by /sandcastle-dispatch-wave):
 //       The dispatcher sets env vars before invoking this script:
 //         SANDCASTLE_ISSUE_NUMBER  e.g. "2"
-//         SANDCASTLE_BRANCH        e.g. "agent/issue-2"
+//         SANDCASTLE_BRANCH        e.g. "agent/feature-x/issue-2"
+//         SANDCASTLE_BASE_BRANCH   e.g. "feature/x" (base of the PR; what
+//                                  the host repo's HEAD pointed at when
+//                                  dispatch was launched — propagated for
+//                                  diagnostic logging only; the agent reads
+//                                  it from the prompt for `gh pr create
+//                                  --base`).
 //         SANDCASTLE_PROMPT_FILE   e.g. "./.sandcastle/prompts/issue-2.md"
 //       branchStrategy switches to { type: 'branch', branch: $BRANCH } so
-//       Sandcastle creates a dedicated branch for the agent's commits and
-//       a PR can be opened against it.
+//       Sandcastle creates a dedicated branch (from the host repo's HEAD,
+//       which is whichever branch the dispatcher was standing on — feature
+//       branches and worktrees supported) and the agent opens a PR against
+//       SANDCASTLE_BASE_BRANCH.
 //
 // Optional GH_TOKEN: pass through if present so the agent can `gh issue
 // comment` and `gh pr create` from inside the container.
@@ -51,6 +59,7 @@ if (ghToken) {
 // Per-dispatch overrides (set by /sandcastle-dispatch-wave).
 const issueNumber = process.env.SANDCASTLE_ISSUE_NUMBER;
 const branchName = process.env.SANDCASTLE_BRANCH;
+const baseBranch = process.env.SANDCASTLE_BASE_BRANCH; // Para diagnóstico; el agente lo lee del prompt para `gh pr create --base`.
 const promptFile =
   process.env.SANDCASTLE_PROMPT_FILE ?? "./.sandcastle/prompt.md";
 
@@ -61,7 +70,7 @@ const branchStrategy =
 
 if (issueNumber) {
   console.log(
-    `[sandcastle-max] AFK dispatch — issue #${issueNumber}, branch=${branchName ?? "(head)"}, prompt=${promptFile}`,
+    `[sandcastle-max] AFK dispatch — issue #${issueNumber}, branch=${branchName ?? "(head)"}, base=${baseBranch ?? "(host HEAD)"}, prompt=${promptFile}`,
   );
 } else {
   console.log(

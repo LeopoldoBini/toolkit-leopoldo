@@ -1,6 +1,6 @@
 {
   "name": "engineering-workflow",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "description": "Unified engineering workflow: alignment → PRD → vertical-slice issues → AFK handoff → TDD execution → architectural sanity → triage. Run /init-workflow once per repo to seed the pipeline order in CLAUDE.md. Skills: grill-with-docs, context-bootstrap, to-prd, to-issues, agent-brief, triage, tdd-vertical, diagnose, zoom-out, deep-modules.",
   "author": {
     "name": "Leopoldo Bini",

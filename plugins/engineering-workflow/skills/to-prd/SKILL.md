@@ -21,7 +21,7 @@ Check with the user that these modules match their expectations. Check with the 
 
 ### 3. Write the PRD
 
-Use the template below. If the project has an issue tracker (GitHub, Linear, ClickUp, etc.) and the user wants it published, do so — otherwise output the PRD inline. If publishing, apply a `needs-triage` label so it enters the normal triage flow (see `/triage`).
+Use the template below. If the project has an issue tracker (GitHub, Linear, ClickUp, etc.) and the user wants it published, do so — otherwise output the PRD inline. If publishing, apply a `ready-for-agent` label — no need for additional triage (the `/grill-with-docs` + `/to-prd` flow already constitutes human triage).
 
 <prd-template>
 

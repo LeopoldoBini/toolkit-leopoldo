@@ -49,7 +49,7 @@ Iterate until the user approves the breakdown.
 
 ### 5. Publish or output
 
-For each approved slice, publish a new issue (if a tracker is in use) or output it inline. Use the issue body template below. Apply a `needs-triage` label so each issue enters the normal triage flow (see `/triage`).
+For each approved slice, publish a new issue (if a tracker is in use) or output it inline. Use the issue body template below. These issues are considered ready for AFK agents, so publish them with the `ready-for-agent` label unless instructed otherwise.
 
 Publish issues in dependency order (blockers first) so you can reference real issue identifiers in the "Blocked by" field.
 

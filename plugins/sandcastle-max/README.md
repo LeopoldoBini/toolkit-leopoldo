@@ -6,44 +6,61 @@ Workaround for Sandcastle [issue #191](https://github.com/mattpocock/sandcastle/
 
 ## End-to-end flow (how Leo and Claude use this together)
 
+**v0.5.0** introdujo el flujo Opus-everywhere con merge-agent y validator local. El ciclo AFK ahora es completamente managed por este plugin — sin GH Actions, sin `/triage` manual (gracias a engineering-workflow >=2.1.0).
+
 ```
-   1. PRD               2. Issues + briefs      3. Wave dispatch       4. CI gate
-   ──────               ────────────────        ───────────────         ────────
-   /to-prd              /to-issues + /triage    /sandcastle-dispatch    .github/workflows/
-   PRD doc              GH issue body            -wave                   afk-automerge.yml
-                        + ## Agent Brief         (this plugin)
-                        comment (single,
-                        edited not duplicated
-                        per engineering-
-                        workflow >=2.1.0)
-                                                       │
-                                                       │  parallel containers
-                                                       │  (one per eligible issue)
-                                                       ▼
-                                                 5. Agent works
-                                                    ──────────
-                                                    Reads CLAUDE.md, the
-                                                    inlined brief, and any
-                                                    docs/phase1-decisions.md
-                                                    P-anchors the brief links.
-                                                    Implements vertical slice,
-                                                    runs tests, opens PR with
-                                                    `afk-agent-pr` label,
-                                                    comments on issue, prints
-                                                    <promise>COMPLETE</promise>.
-                                                       │
-                                                       ▼
-                                                 6. CI decides
-                                                    ──────────
-                                                    afk-checks.yml runs
-                                                    typecheck/tests/playwright.
-                                                    afk-automerge.yml decides
-                                                    auto-merge per tier (Q8):
-                                                    F* → hold for review,
-                                                    VS* → auto-merge on green
-                                                    (escape hatch for BLOCKED
-                                                    or unchecked criteria).
+   1. Pipeline humano (engineering-workflow)
+   ─────────────────────────────────────────
+   /grill-with-docs ─► /to-prd ─► /to-issues
+                                       │
+                                       │ Issues con label `ready-for-agent` directo
+                                       │ + `## Agent Brief` comment (single-brief invariant)
+                                       ▼
+
+   2. Dispatch + implementación AFK (este plugin)
+   ──────────────────────────────────────────────
+   /sandcastle-pipeline (o /sandcastle-dispatch-wave manual)
+        │
+        │  N containers Opus 4.7 en paralelo (default --max-parallel 4)
+        │  Cada uno:
+        │   - branchStrategy: { type: 'branch', branch: agent/<base-slug>/issue-N }
+        │   - Lee CLAUDE.md + brief + diff
+        │   - Implementa vertical slice
+        │   - Self-check vs brief (single-axis Spec)
+        │   - Abre PR con label afk-agent-pr contra $BASE_BRANCH
+        │   - Emite <promise>COMPLETE</promise> o <promise>BLOCKED</promise> + subtipo
+        ▼
+
+   3. Validate local (este plugin, Fase 3)
+   ───────────────────────────────────────
+   scripts/sandcastle-validate.sh $PR
+        │  docker run --rm liviano (oven/bun:latest u override)
+        │  bun install + typecheck + test sobre worktree fresh
+        │  → label afk-checks-passed o afk-checks-failed + comentario al PR
+        ▼
+
+   4. Review + merge (este plugin)
+   ───────────────────────────────
+   /sandcastle-merge-wave (o lo invoca el pipeline)
+        │
+        │  Step 1: N reviewers Opus paralelos (read-only)
+        │          single-axis Spec — juzga contra el brief
+        │          emite <verdict>APPROVE|HOLD|BLOCK</verdict>
+        │
+        │  Step 2: Coordinator Opus topológico (1 invocación)
+        │          orden de merge + pares de riesgo semántico
+        │
+        │  Step 3: Loop secuencial de merge
+        │          auto-rebase → si conflict → conflict-resolver Opus
+        │                                       (intent-aware, RESOLVED/INCOMPATIBLE)
+        │          sandcastle-validate post-rebase
+        │          gh pr merge --squash --delete-branch
+        ▼
+
+   5. Loop hasta que no queden issues elegibles
 ```
+
+**Fase 6 (diferida)**: cuando `/review` de Matt Pocock gradúe de in-progress a stable, el reviewer del Step 1 pasa a two-axis (Standards + Spec en paralelo sin merge ni rerank).
 
 ## What this plugin gives you
 
@@ -51,7 +68,19 @@ Workaround for Sandcastle [issue #191](https://github.com/mattpocock/sandcastle/
 
 - **`/sandcastle-init`** — scaffolds `.sandcastle/` in any repo: Dockerfile (with chmod 1777 fix + Claude installer state cleanup), env-var-driven `main.mts`, prompt template, `.env.example`, `scripts/claude-oauth-env.sh` (Keychain → env, no leak), package.json scripts, `.gitignore` updates. **Idempotent** — refuses to overwrite without `--force`.
 
-- **`/sandcastle-dispatch-wave`** *(v0.3.1)* — wave-based AFK dispatcher. Reads the GH issue dependency graph (parsing `## Blocked by` from issue bodies), detects eligible issues (label `ready-for-agent` o `state/ready-for-agent` + all deps closed + no open PR), shows preview, asks confirmation, then launches one Docker container per eligible issue in parallel. Each container gets its own per-issue `prompt.md` with the brief inlined. Failure isolation: a single container failing (idle, BLOCKED, crash) doesn't abort siblings, but env-level failures (Docker daemon, OAuth) abort the entire wave.
+- **`/sandcastle-dispatch-wave`** *(v0.5.0)* — wave-based AFK dispatcher. Reads the GH issue dependency graph (parsing `## Blocked by` from issue bodies), detects eligible issues (label `ready-for-agent` o `state/ready-for-agent` + all deps closed + no open PR), shows preview, asks confirmation, then launches one Docker container per eligible issue in parallel. **Soporta feature branches y worktrees** — detecta el HEAD actual como base (no asume `main`), naming `agent/<base-slug>/issue-N` evita colisiones. **Default Opus 4.7** (parametrizable vía `SANDCASTLE_MODEL`). Self-check vs brief antes del PR. Subtipos de BLOCKED (`BRIEF_AMBIGUOUS`, `CODEBASE_UNEXPECTED`, `DEPENDENCY_MISSING`) para ruteo downstream.
+
+- **`/sandcastle-merge-wave`** *(v0.5.0)* — cierre del loop AFK. Espejo de dispatch-wave para la mitad post-implementación. (1) Review paralelo Opus (single-axis Spec) sobre PRs con label `afk-agent-pr + afk-checks-passed`, emite verdicts APPROVE/HOLD/BLOCK con subtipos. (2) Coordinator Opus topológico decide orden de merge y marca pares de riesgo semántico. (3) Merge serial con auto-rebase; si hay conflict, lanza un **conflict-resolver agent intent-aware** que emite `RESOLVED` (push --force) o `INCOMPATIBLE` (escalate a Leo con label `intent-conflict`). Fixer-container para BLOCK + IMPLEMENTATION; re-brief para BRIEF_AMBIGUOUS. Cap 2 rounds por issue.
+
+- **`/sandcastle-pipeline`** *(v0.5.0)* — meta-comando integrador. Loopa dispatch-wave → polling local de sandcastle-validate → merge-wave hasta que no queden issues elegibles. Checkpoints JSON tras cada step grande (`.sandcastle/checkpoints/<wave-ts>.json`) permiten reanudar tras interrupciones. Detección de quota Max exhausted (parseo de logs en busca de rate limit / 429) con abort + label `quota-exhausted`. Default `--max-parallel 4` con Opus. Args `--max-iterations`, `--from-iteration`, `--dry-run`, `--no-confirm`, `--abort-on-block`.
+
+- **`/afk-pr-triage`** *(legacy, v0.4.0)* — deterministic PR triage (typecheck/tests + parsing de acceptance criteria), sin juicio sobre código. **Reemplazado por `/sandcastle-merge-wave`** en v0.5.0. Se mantiene como fallback para casos donde no querés gastar Opus en review (proyectos muy chicos o calibración inicial).
+
+### Scripts ejecutables
+
+- **`scripts/sandcastle-validate.sh <PR_NUMBER>`** *(v0.5.0)* — local CI gate. Corre typecheck + tests en container Docker liviano (default `oven/bun:latest`) sobre worktree fresh del PR. Aplica labels `afk-checks-passed` / `afk-checks-failed` + postea error truncado como comentario en el PR si falla. Sin Claude Code adentro. Reemplaza el workflow remoto `afk-checks.yml`. Customizable vía `SANDCASTLE_VALIDATOR_IMAGE` env var o `.sandcastle/validate.cmds` archivo del proyecto.
+
+- **`scripts/claude-oauth-env.sh`** — Keychain (macOS) → `CLAUDE_CODE_OAUTH_TOKEN` env var. Sourceá antes de `bun run sandcastle:run`. En Linux/server, paste el token directo en `.sandcastle/.env`.
 
 ### Skill
 
@@ -112,12 +141,17 @@ This makes wave-based ops uniform: one command for first-try and retries.
 - The Sandcastle maintainer chose not to support this in core (issue #191 wontfix). The workaround is non-obvious enough to deserve a packaged solution.
 - Wave-based dispatch + dep-graph reading + failure isolation are not in Sandcastle either — they're operational concerns that emerged when running this against a real 12-issue MVP.
 
-## What this plugin does NOT do
+## What this plugin does NOT do (v0.5.0)
 
-- **CI / auto-merge logic.** That lives in `.github/workflows/afk-automerge.yml` per project (the dispatcher just adds the `afk-agent-pr` label so CI knows what to gate). The plugin does not generate CI workflows — the project chooses its CI provider.
-- **PR review.** When the agent opens a PR, a human (you) reviews it via standard GH UI flow. The dispatcher only opens; humans (or auto-merge based on labels + tests) decide ship.
-- **Brief authoring.** Briefs come from the `engineering-workflow` plugin's `/agent-brief` and `/triage` skills. This plugin **consumes** the latest `## Agent Brief` comment on the issue. If the comment doesn't exist, the dispatcher refuses with an actionable error.
-- **Cross-cutting decisions.** The brief should link to project-local docs (e.g. `docs/phase1-decisions.md`); the agent reads them on-demand inside the container per the prompt's reading order. The dispatcher does NOT inline these docs.
+- **Brief authoring.** Briefs come from the `engineering-workflow` plugin's `/agent-brief` and `/triage` skills. Este plugin **consume** el último `## Agent Brief` comment del issue. Si no existe, dispatch-wave aborta con error accionable.
+- **Cross-cutting decisions.** El brief linkea a docs del proyecto (ej. `docs/phase1-decisions.md`); el agente las lee on-demand inside the container. El dispatcher NO los inlinea.
+- **Standards review.** El reviewer actual evalúa solo Spec (¿la implementación honra el contrato?). El eje Standards (CLAUDE.md, CONTEXT.md, ADRs) se incorpora en Fase 6 cuando `/review` de Matt Pocock gradúe a stable.
+
+**Cambios v0.5.0 (lo que SÍ hace ahora que antes no):**
+- ✓ **PR review automático** (era humano-only): `/sandcastle-merge-wave` con Opus reviewer.
+- ✓ **Auto-merge sin GH Actions** (era remoto): merge serial con coordinator + intent-aware resolver.
+- ✓ **CI gate local** (era `afk-checks.yml` remoto): `scripts/sandcastle-validate.sh`.
+- ✓ **Feature branches y worktrees** (era main-only): naming `agent/<base-slug>/issue-N`, PR contra base detectada.
 
 ## Limitations
 
@@ -126,25 +160,29 @@ This makes wave-based ops uniform: one command for first-try and retries.
 - **Sandcastle hardcodes** `--user $HOST_UID:$HOST_GID` and `HOME=/home/agent`. The Dockerfile is shaped around those constraints. If Sandcastle changes that, the Dockerfile may need adjustment — see the `sandcastle-afk` skill's grep map.
 - **Concurrency capped by dep graph.** The dispatcher launches all eligible at once. If your dep graph naturally serializes (e.g. all issues block on a single foundation), the wave will be size 1.
 
-## Files in this plugin
+## Files in this plugin (v0.5.0)
 
 ```
 sandcastle-max/
 ├── plugin.json
 ├── README.md                                     ← this file
 ├── commands/
-│   ├── sandcastle-init.md                        ← /sandcastle-init slash command
-│   └── sandcastle-dispatch-wave.md               ← /sandcastle-dispatch-wave (v0.3.0)
+│   ├── sandcastle-init.md                        ← /sandcastle-init (scaffolding)
+│   ├── sandcastle-dispatch-wave.md               ← /sandcastle-dispatch-wave (feature branches + self-check)
+│   ├── sandcastle-merge-wave.md                  ← /sandcastle-merge-wave (NEW: review + merge orquestado)
+│   ├── sandcastle-pipeline.md                    ← /sandcastle-pipeline (NEW: integrador con checkpoints)
+│   └── afk-pr-triage.md                          ← /afk-pr-triage (legacy, reemplazado por merge-wave)
 ├── skills/
 │   └── sandcastle-afk/
 │       └── SKILL.md                              ← troubleshooting + architecture + grep map
 ├── templates/
 │   ├── Dockerfile                                ← fixed (chmod 1777 + .claude.json cleanup)
-│   ├── main.mts                                  ← env-var-driven (smoke or AFK dispatch)
+│   ├── main.mts                                  ← env-var-driven, default Opus 4.7
 │   ├── prompt.md                                 ← smoke test placeholder
 │   └── env.example                               ← CLAUDE_CODE_OAUTH_TOKEN + GH_TOKEN
 └── scripts/
-    └── claude-oauth-env.sh                       ← Keychain → CLAUDE_CODE_OAUTH_TOKEN, no leak
+    ├── claude-oauth-env.sh                       ← Keychain → CLAUDE_CODE_OAUTH_TOKEN
+    └── sandcastle-validate.sh                    ← NEW: local CI gate (reemplaza afk-checks.yml)
 ```
 
 ## Related plugins in this marketplace
@@ -153,7 +191,15 @@ sandcastle-max/
 
 ## Version history
 
-- **0.3.1** — `/sandcastle-dispatch-wave` pre-flight self-recovers missing env vars: auto-sources `scripts/claude-oauth-env.sh` if `CLAUDE_CODE_OAUTH_TOKEN` is missing, and auto-exports `GH_TOKEN=$(gh auth token)` if no GH token is set. Removes the manual setup step before invoking the dispatcher from a Claude session. Documents the single-Bash-invocation requirement (Claude Code Bash tool calls don't share env state across calls).
-- **0.3.0** — `/sandcastle-dispatch-wave` command added. `main.mts` is now env-var-driven (smoke vs AFK dispatch detected automatically). Per-issue prompt files in `.sandcastle/prompts/`. Failure isolation per Q11. Smart wave (Q12) handles first-try + retries uniformly.
+- **0.5.0** — Rediseño Opus everywhere + merge-agent + feature branches (5 fases del plan 2026-05-13).
+  - `templates/main.mts`: modelo parametrizable vía `SANDCASTLE_MODEL` env var, default Opus 4.7. Lee `SANDCASTLE_BASE_BRANCH` para logging.
+  - `/sandcastle-dispatch-wave`: detecta base branch del HEAD actual (soporta feature branches y worktrees), naming `agent/<base-slug>/issue-N` evita colisiones, PR contra base detectada (no main hardcoded). Self-check vs brief antes del PR (single-axis Spec). Subtipos de BLOCKED (BRIEF_AMBIGUOUS / CODEBASE_UNEXPECTED / DEPENDENCY_MISSING). Pre-flight warna si otro worktree tiene PIDs vivos.
+  - `/sandcastle-merge-wave` (NUEVO): orquestador de review + merge en 3 steps (review paralelo Opus → coordinator topológico → merge serial con auto-rebase + conflict-resolver intent-aware). Fixer-container para BLOCK + IMPLEMENTATION; re-brief para BRIEF_AMBIGUOUS. Cap 2 rounds.
+  - `/sandcastle-pipeline` (NUEVO): integrador con loop, polling local cada 30s, checkpoints JSON para recovery, detección de quota Max exhausted.
+  - `scripts/sandcastle-validate.sh` (NUEVO): local CI gate, reemplaza `afk-checks.yml` remoto. Container Docker liviano (`oven/bun:latest` default) sobre worktree fresh del PR.
+- **0.4.1** — `/sandcastle-dispatch-wave` acepta label flat (`ready-for-agent`) o namespaced (`state/ready-for-agent`).
+- **0.4.0** — `/afk-pr-triage` cierra el AFK loop (reemplazado por merge-wave en v0.5.0).
+- **0.3.1** — `/sandcastle-dispatch-wave` pre-flight self-recovers missing env vars (OAuth + GH token).
+- **0.3.0** — `/sandcastle-dispatch-wave` command added. `main.mts` env-var-driven. Per-issue prompt files. Failure isolation. Smart wave (first-try + retries uniformes).
 - **0.2.0** — Sandcastle-internals grep map added to skill (forward-compat debugging).
 - **0.1.0** — Initial release: `/sandcastle-init` + `sandcastle-afk` skill.

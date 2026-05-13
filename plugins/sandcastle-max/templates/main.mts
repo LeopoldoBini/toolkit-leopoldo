@@ -69,8 +69,14 @@ if (issueNumber) {
   );
 }
 
+console.log(
+  `[sandcastle-max] model=${process.env.SANDCASTLE_MODEL ?? "claude-opus-4-7"} (default Opus 4.7; override with SANDCASTLE_MODEL)`,
+);
+
+const model = process.env.SANDCASTLE_MODEL ?? "claude-opus-4-7";
+
 await run({
-  agent: claudeCode("claude-sonnet-4-6", {
+  agent: claudeCode(model, {
     env: agentEnv,
   }),
   sandbox: docker({

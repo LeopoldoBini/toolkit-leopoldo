@@ -205,7 +205,20 @@ issue body and discussion are context only — this brief is the contract.
    - `bun test` (unit tests)
    - `bun run test:ui` (UI tests, if applicable)
 3. Commit your work to the current branch (`{{BRANCH}}`) with conventional-commit style messages.
-4. Open a PR:
+4. **Self-check vs brief antes de abrir el PR.** Esto NO es opcional — es la última oportunidad de detectar que falta algo antes de que el revisor externo lo encuentre:
+   1. Re-leé el brief original (sección "Your contract" arriba).
+   2. Listá los criterios de aceptación uno por uno.
+   3. Para cada criterio, decidí explícitamente:
+      - **Cubierto por código** → marcalo `[x]` y citá el archivo/función concreta.
+      - **Cubierto por tests** → marcalo `[x]` y citá el test concreto.
+      - **No cubierto** → decidí:
+         a. Si es chico y claro, implementalo ahora (commit adicional al mismo branch).
+         b. Si es ambiguo o requiere clarificación del usuario, emitir `<promise>BLOCKED</promise>` con `<block-reason>BRIEF_AMBIGUOUS</block-reason>` (ver "Completion signals" abajo).
+   4. Solo procedé a `gh pr create` si **todos** los criterios están `[x]` o explícitamente excluidos en una sección "Out of scope" del brief.
+
+   Anotá el resultado de este self-check en el cuerpo del PR (paso 5) para que el revisor tenga el rastro.
+
+5. Open a PR:
    ```bash
    gh pr create \
      --base {{BASE_BRANCH}} \
@@ -224,7 +237,7 @@ issue body and discussion are context only — this brief is the contract.
    ```bash
    gh pr edit <PR_NUMBER> --add-label afk-agent-pr
    ```
-5. Comment on the issue with a short summary + PR link:
+6. Comment on the issue with a short summary + PR link:
    ```bash
    gh issue comment {{N}} --body "Implemented by AFK agent. PR: <link>. Acceptance criteria: <N/N>."
    ```
@@ -234,10 +247,19 @@ issue body and discussion are context only — this brief is the contract.
 End your run with EXACTLY one of these tokens. The dispatcher reads them to determine outcome:
 
 - `<promise>COMPLETE</promise>` — you implemented the contract, opened a PR, commented on the issue. CI will decide auto-merge per its tier rules.
-- `<promise>BLOCKED</promise>` — you cannot complete the contract because the brief is ambiguous, the codebase is in unexpected state, or a dep is missing. **Before printing this, you MUST**:
+- `<promise>BLOCKED</promise>` — you cannot complete the contract. Include a subtype indicating why:
+  - `<block-reason>BRIEF_AMBIGUOUS</block-reason>` — the brief is unclear, missing detail, or has contradictions. The reviewer can re-clarify and re-dispatch.
+  - `<block-reason>CODEBASE_UNEXPECTED</block-reason>` — the codebase state doesn't match what the brief assumed (missing module, broken existing code, dep that doesn't exist).
+  - `<block-reason>DEPENDENCY_MISSING</block-reason>` — work depends on something not yet merged (a sibling PR, an external service not deployed).
+
+  **Before printing this, you MUST**:
   1. `gh issue comment {{N}} --body "@LeopoldoBini blocked: <reason>. Need clarification on <X>."`
   2. `gh issue edit {{N}} --add-label agent-blocked`
-  Then output `<promise>BLOCKED</promise>`.
+  Then output the BLOCKED block with the subtype, e.g.:
+  ```
+  <promise>BLOCKED</promise>
+  <block-reason>BRIEF_AMBIGUOUS</block-reason>
+  ```
 - (no token) — your run will time out as `agent-stuck`. Don't do this. If you're truly stuck after best effort, use BLOCKED.
 
 ## Anti-patterns (do not do these)
@@ -282,9 +304,13 @@ Then enter monitor mode:
 - Every 30s, check `docker info` to detect daemon failures (Q11 wave-fatal).
 - Every 30s, list still-running PIDs from `.sandcastle/logs/issue-*.pid`.
 - For each completed PID, parse the tail of its log for `<promise>COMPLETE</promise>` or `<promise>BLOCKED</promise>` or `AgentIdleTimeoutError` or other.
+- If the log contains a `<promise>BLOCKED</promise>` token, also parse the accompanying `<block-reason>...</block-reason>` (one of `BRIEF_AMBIGUOUS`, `CODEBASE_UNEXPECTED`, `DEPENDENCY_MISSING`); record it in the wave report so downstream tooling (merge-wave, retry logic) can route the issue.
 - Apply the outcome:
   - `COMPLETE` + PR opened → ✓
-  - `BLOCKED` → already commented + labeled by the agent, just record outcome
+  - `BLOCKED` → already commented + `agent-blocked` label applied by the agent. Additionally apply a subtype label based on `<block-reason>`:
+    - `BRIEF_AMBIGUOUS` → label `agent-blocked-rebrief` (merge-wave/triage will re-clarify and re-dispatch)
+    - `CODEBASE_UNEXPECTED` or `DEPENDENCY_MISSING` → label `agent-blocked-codebase` (human investigation needed)
+    - If no subtype emitted → label `agent-blocked-unknown` and prompt user to inspect logs
   - idle timeout (`AgentIdleTimeoutError`) → `gh issue edit N --add-label agent-stuck` + `gh issue comment N --body "Agent idle-timed out. Inspect logs at $LOG. Re-run /sandcastle-dispatch-wave to retry."`
   - non-zero exit without COMPLETE/BLOCKED → `gh issue edit N --add-label agent-crashed` + `gh issue comment N --body "Agent crashed. Inspect logs at $LOG."`
 

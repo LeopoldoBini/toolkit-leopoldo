@@ -28,7 +28,7 @@ git rev-parse --show-toplevel >/dev/null || { echo "✗ not a git repo"; exit 1;
 [[ -f .sandcastle/main.mts ]] || { echo "✗ .sandcastle/ not scaffolded — run /sandcastle-init first"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "✗ Docker daemon not running"; exit 1; }
 gh repo view --json nameWithOwner --jq .nameWithOwner >/dev/null || { echo "✗ gh repo unresolved"; exit 1; }
-docker image inspect sandcastle-max >/dev/null 2>&1 || { echo "✗ sandcastle-max image not built — run 'bun run sandcastle:build'"; exit 1; }
+docker image inspect sandcastle-max >/dev/null 2>&1 || { echo "✗ sandcastle-max image not built — run '<pkg-mgr> sandcastle:build' (pnpm/bun/npm/yarn según el proyecto)"; exit 1; }
 
 # Auto-recover OAuth token: if missing, attempt to source the helper.
 if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
@@ -198,14 +198,23 @@ issue body and discussion are context only — this brief is the contract.
 
 ## What you must do
 
-1. Implement the contract above — produce a complete vertical slice (schema → API → UI → tests, as applicable).
-2. Run the project's test suite locally inside the container before committing:
-   - `bun run typecheck:ui` (UI typecheck)
-   - `tsc --noEmit` (backend typecheck)
-   - `bun test` (unit tests)
-   - `bun run test:ui` (UI tests, if applicable)
-3. Commit your work to the current branch (`{{BRANCH}}`) with conventional-commit style messages.
-4. **Self-check vs brief antes de abrir el PR.** Esto NO es opcional — es la última oportunidad de detectar que falta algo antes de que el revisor externo lo encuentre:
+1. **Install dependencies inside the container.** The bind-mounted workspace does NOT include `node_modules` (host-built artifacts wouldn't work cross-platform anyway). Detect the package manager from lockfiles and install with the frozen-lockfile flag so you get the exact versions the repo expects:
+   - `pnpm-lock.yaml` present → `pnpm install --frozen-lockfile`
+   - `bun.lockb` or `bun.lock` present → `bun install --frozen-lockfile`
+   - `yarn.lock` present → `yarn install --frozen-lockfile`
+   - `package-lock.json` present → `npm ci`
+
+   This usually takes 1-5 minutes for large repos; it's a one-time cost per dispatch.
+
+2. Implement the contract above — produce a complete vertical slice (schema → API → UI → tests, as applicable).
+3. **Run the project's checks locally inside the container before committing.** Use whichever scripts the repo actually defines (read `package.json`'s `scripts` section); typical commands per package manager:
+   - **pnpm:** `pnpm tsc --noEmit`, `pnpm test:run` (Vitest CI mode) or `pnpm test`, plus any `lint`/`analyze-changed` scripts the project exposes.
+   - **bun:** `bun run typecheck` (or `tsc --noEmit`), `bun test`, plus `bun run typecheck:ui` / `bun run test:ui` if the project has them.
+   - **yarn/npm:** the equivalent `yarn`/`npm run <script>` invocations.
+
+   If a check fails, FIX it — do not commit failing code. If a script doesn't exist in the repo, skip it (don't invent commands).
+4. Commit your work to the current branch (`{{BRANCH}}`) with conventional-commit style messages.
+5. **Self-check vs brief antes de abrir el PR.** Esto NO es opcional — es la última oportunidad de detectar que falta algo antes de que el revisor externo lo encuentre:
    1. Re-leé el brief original (sección "Your contract" arriba).
    2. Listá los criterios de aceptación uno por uno.
    3. Para cada criterio, decidí explícitamente:
@@ -216,9 +225,9 @@ issue body and discussion are context only — this brief is the contract.
          b. Si es ambiguo o requiere clarificación del usuario, emitir `<promise>BLOCKED</promise>` con `<block-reason>BRIEF_AMBIGUOUS</block-reason>` (ver "Completion signals" abajo).
    4. Solo procedé a `gh pr create` si **todos** los criterios están `[x]` o explícitamente excluidos en una sección "Out of scope" del brief.
 
-   Anotá el resultado de este self-check en el cuerpo del PR (paso 5) para que el revisor tenga el rastro.
+   Anotá el resultado de este self-check en el cuerpo del PR (paso 6) para que el revisor tenga el rastro.
 
-5. Open a PR:
+6. Open a PR:
    ```bash
    gh pr create \
      --base {{BASE_BRANCH}} \
@@ -237,7 +246,7 @@ issue body and discussion are context only — this brief is the contract.
    ```bash
    gh pr edit <PR_NUMBER> --add-label afk-agent-pr
    ```
-6. Comment on the issue with a short summary + PR link:
+7. Comment on the issue with a short summary + PR link:
    ```bash
    gh issue comment {{N}} --body "Implemented by AFK agent. PR: <link>. Acceptance criteria: <N/N>."
    ```

@@ -1,0 +1,9 @@
+{
+  "name": "merge-orchestrator",
+  "version": "0.1.0",
+  "description": "Host-side intent-aware merge orchestrator for batches of open GitHub PRs. Runs entirely in your Claude Code session (no Docker, no Sandcastle SDK). Discovers PRs, computes topological merge order from `Blocked by` deps + file overlap, dispatches a fresh Opus `merge-resolver` subagent per PR with full intent context (issue brief cascade), executes squash merges serially with auto-rebase and ephemeral worktrees for conflict resolution. Skill `merge-orchestrator` auto-invocable; slash command `/merge-orchestrate` explicit. Custom agent `merge-resolver` enforces 5 explicit no-regression criteria. Complementary to sandcastle-max (which does the same flow but in Docker AFK for large volume).",
+  "author": {
+    "name": "Leopoldo Bini",
+    "email": "raul.leopoldobini@gmail.com"
+  }
+}

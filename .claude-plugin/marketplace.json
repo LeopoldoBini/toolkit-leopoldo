@@ -48,6 +48,14 @@
       "category": "productivity"
     },
     {
+      "name": "merge-orchestrator",
+      "description": "Host-side intent-aware merge orchestrator for batches of 2-7 open GitHub PRs. Runs entirely in your Claude Code session (no Docker, no Sandcastle SDK). Skill auto-invocable ('mergeame los PRs', 'orquestá los merges en orden', 'intent-aware merge') + slash command `/merge-orchestrate`. Per PR: gathers intent via cascade (issue brief → PR body → commits → diff), computes topological order from `Blocked by` deps + file-overlap risk pairs, refreshes base, `gh pr update-branch`, ephemeral worktree, cascade validation, dispatches a fresh Opus `merge-resolver` subagent that enforces 5 no-regression criteria and emits `<action>MERGE|HOLD|ABORT</action>` + `<resolution>RESOLVED|INCOMPATIBLE|NOT_NEEDED</resolution>`. Host executes the recommendation (squash --delete-branch by default). Auto-stash dirty working tree, restore at end. Idempotent (GitHub-as-state). Complementary to sandcastle-max (Docker-AFK, parallel reviewers) — same 5 criteria, different substrate.",
+      "version": "0.1.0",
+      "author": { "name": "Leopoldo Bini" },
+      "source": "./plugins/merge-orchestrator",
+      "category": "engineering"
+    },
+    {
       "name": "sandcastle-max",
       "description": "AFK Claude Code agents en Docker contra tu Claude Max subscription (vía CLAUDE_CODE_OAUTH_TOKEN, workaround para Sandcastle issue #191 wontfix). v0.5.0: Opus 4.7 default everywhere (implementer + reviewer + resolver + fixer), soporte de feature branches + worktrees (naming agent/<base-slug>/issue-N), self-check vs brief pre-PR, ciclo completo sin GH Actions. /sandcastle-init scaffolds .sandcastle/ (Dockerfile + main.mts env-driven). /sandcastle-dispatch-wave lanza N containers Opus paralelos sobre issues `ready-for-agent` con deps cerradas; PR contra base branch detectada (soporta feature branches y worktrees). /sandcastle-merge-wave (v0.5.0): review paralelo Opus single-axis Spec + coordinator topológico + merge serial con auto-rebase y conflict-resolver intent-aware (outputs RESOLVED/INCOMPATIBLE con criterios de no-regresión explícitos). /sandcastle-pipeline (v0.5.0): integrador que loopa dispatch → validate → merge con checkpoints JSON, polling local cada 30s, detección de quota Max exhausted. scripts/sandcastle-validate.sh: local CI gate en Docker liviano que reemplaza afk-checks.yml. /afk-pr-triage queda como fallback legacy. Skill sandcastle-afk: gotchas + grep map de Sandcastle internals.",
       "version": "0.5.0",

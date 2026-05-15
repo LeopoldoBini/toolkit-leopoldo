@@ -24,10 +24,13 @@
 #     que reemplaza los defaults. Si no existe, usa los defaults de abajo.
 #
 # Default commands (cuando no hay .sandcastle/validate.cmds):
-#   bun install --frozen-lockfile
-#   bun run typecheck  (si existe el script)
-#   bunx tsc --noEmit  (si hay tsconfig.json)
-#   bun test           (si hay tests configurados)
+# v2 scaffold (multi-stack):
+#   - package.json + lockfile → install + typecheck + test (pkg-mgr según lockfile)
+#   - *.csproj / *.sln       → dotnet restore + build + test
+#   - pyproject.toml / requirements.txt → pip install + pytest
+#   - go.mod                  → go test ./...
+# Si tu proyecto necesita pasos custom, crear .sandcastle/validate.cmds con
+# un script bash inline.
 
 set -euo pipefail
 
@@ -84,13 +87,23 @@ echo "[sandcastle-validate] worktree ready at $WORKDIR"
 
 VALIDATOR_IMAGE="${SANDCASTLE_VALIDATOR_IMAGE:-}"
 if [[ -z "$VALIDATOR_IMAGE" ]]; then
-  # Default heuristic:
-  #   - si hay imagen `sandcastle-validator` local, usarla
-  #   - sino, oven/bun:latest (el plugin asume bun)
-  if docker image inspect sandcastle-validator >/dev/null 2>&1; then
-    VALIDATOR_IMAGE="sandcastle-validator"
-  else
-    VALIDATOR_IMAGE="oven/bun:latest"
+  # Default: use the project's per-project sandcastle image from
+  # .sandcastle/config.json (v2 scaffold). The image already has the
+  # right runtimes installed (Node/Bun/Python/.NET) per the project's
+  # detected stack.
+  if [[ -f .sandcastle/config.json ]] && command -v jq >/dev/null 2>&1; then
+    CONFIG_IMAGE=$(jq -r '.imageName // empty' .sandcastle/config.json 2>/dev/null)
+    if [[ -n "$CONFIG_IMAGE" ]] && docker image inspect "$CONFIG_IMAGE" >/dev/null 2>&1; then
+      VALIDATOR_IMAGE="$CONFIG_IMAGE"
+    fi
+  fi
+  # Legacy / fallback heuristic (pre-v2 repos or no config):
+  if [[ -z "$VALIDATOR_IMAGE" ]]; then
+    if docker image inspect sandcastle-validator >/dev/null 2>&1; then
+      VALIDATOR_IMAGE="sandcastle-validator"
+    else
+      VALIDATOR_IMAGE="oven/bun:latest"
+    fi
   fi
 fi
 
@@ -103,21 +116,63 @@ if [[ -f "$WORKDIR/.sandcastle/validate.cmds" ]]; then
   VALIDATE_SCRIPT=$(cat "$WORKDIR/.sandcastle/validate.cmds")
   echo "[sandcastle-validate] using project-defined commands from .sandcastle/validate.cmds"
 else
-  # Defaults: opportunistic — skip scripts that don't apply.
+  # Defaults: opportunistic — skip scripts that don't apply per detected stack.
+  # The script runs inside the per-project image which already has the right
+  # runtimes installed (Node/Bun/.NET/Python/Go) per /sandcastle-init detection.
   VALIDATE_SCRIPT='
 set -e
-echo "→ bun install"
-bun install --frozen-lockfile
-if jq -e ".scripts.typecheck" package.json >/dev/null 2>&1; then
-  echo "→ bun run typecheck"
-  bun run typecheck
-elif [ -f tsconfig.json ]; then
-  echo "→ bunx tsc --noEmit (fallback, no typecheck script defined)"
-  bunx tsc --noEmit
+
+# --- Node/Bun ---
+if [ -f /work/package.json ]; then
+  if [ -f /work/bun.lockb ] || [ -f /work/bun.lock ]; then
+    echo "→ bun install --frozen-lockfile"
+    bun install --frozen-lockfile
+    jq -e ".scripts.typecheck" /work/package.json >/dev/null 2>&1 && { echo "→ bun run typecheck"; bun run typecheck; } || true
+    jq -e ".scripts.test" /work/package.json >/dev/null 2>&1 && { echo "→ bun test"; bun test; } || true
+  elif [ -f /work/pnpm-lock.yaml ]; then
+    echo "→ pnpm install --frozen-lockfile"
+    pnpm install --frozen-lockfile
+    jq -e ".scripts.typecheck" /work/package.json >/dev/null 2>&1 && pnpm run typecheck || true
+    jq -e ".scripts.test" /work/package.json >/dev/null 2>&1 && pnpm test || true
+  elif [ -f /work/yarn.lock ]; then
+    echo "→ yarn install --frozen-lockfile"
+    yarn install --frozen-lockfile
+    jq -e ".scripts.typecheck" /work/package.json >/dev/null 2>&1 && yarn typecheck || true
+    jq -e ".scripts.test" /work/package.json >/dev/null 2>&1 && yarn test || true
+  elif [ -f /work/package-lock.json ]; then
+    echo "→ npm ci"
+    npm ci
+    jq -e ".scripts.typecheck" /work/package.json >/dev/null 2>&1 && npm run typecheck || true
+    jq -e ".scripts.test" /work/package.json >/dev/null 2>&1 && npm test || true
+  fi
 fi
-if jq -e ".scripts.test" package.json >/dev/null 2>&1; then
-  echo "→ bun test"
-  bun test
+
+# --- .NET ---
+if ls /work/*.sln /work/*.csproj /work/*.fsproj 2>/dev/null | head -1 | grep -q .; then
+  echo "→ dotnet restore"
+  dotnet restore
+  echo "→ dotnet build --no-restore"
+  dotnet build --no-restore
+  echo "→ dotnet test --no-build"
+  dotnet test --no-build
+fi
+
+# --- Python ---
+if [ -f /work/pyproject.toml ] || [ -f /work/requirements.txt ]; then
+  if [ -f /work/requirements.txt ]; then
+    echo "→ pip install -r requirements.txt"
+    pip install -r /work/requirements.txt
+  elif [ -f /work/pyproject.toml ]; then
+    echo "→ pip install -e ."
+    pip install -e /work
+  fi
+  command -v pytest >/dev/null && { echo "→ pytest"; pytest /work; } || true
+fi
+
+# --- Go ---
+if [ -f /work/go.mod ]; then
+  echo "→ go test ./..."
+  cd /work && go test ./...
 fi
 '
 fi

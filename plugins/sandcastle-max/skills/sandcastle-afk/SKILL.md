@@ -19,22 +19,29 @@ The workaround relies on:
 
 So we wire `CLAUDE_CODE_OAUTH_TOKEN` from the host (read from macOS Keychain) into the agent's env, and Claude Code inside the container authenticates with it. No fork of Sandcastle needed.
 
-## Quick start
+## Quick start (v2 — stack-aware scaffold)
 
 ```bash
-# In any repo:
-/sandcastle-init                # generates .sandcastle/ + scripts + package.json wiring
+# In any repo (detects stack automatically, composes per-project Dockerfile):
+/sandcastle-init                # writes .sandcastle/ (Dockerfile, config.json, prompt.md, .env.example)
 
-# Then once:
+# Then once per machine:
 claude setup-token              # populates macOS Keychain (skip if already done)
 
-# Per session:
-source scripts/claude-oauth-env.sh
-bun run sandcastle:build        # 1-3 min first time
-bun run sandcastle:run          # runs the smoke prompt
+# Per repo:
+/sandcastle-build               # build the per-project image (2-5 min first time)
+/sandcastle-run                 # run the smoke prompt
 ```
 
-If the smoke run completes with `<promise>COMPLETE</promise>` in the output, the setup works. If it hangs with `Agent idle for N minutes` and times out at 600s, see Troubleshooting.
+If the smoke run completes with `<promise>COMPLETE</promise>`, the setup works. If it hangs with `Agent idle for N minutes` and times out at 600s, see Troubleshooting.
+
+**v2 vs v1 differences (hard cutoff, no migration):**
+
+- Orchestrator (`main.mts` + `@ai-hero/sandcastle` + `tsx`) lives in the plugin (`${CLAUDE_PLUGIN_ROOT}/runtime/`), not in your repo. No `package.json` contamination — pure .NET / Python / Go repos work natively.
+- Dockerfile is **composed from snippets** in `${CLAUDE_PLUGIN_ROOT}/templates/snippets/` based on runtime detection (`.csproj`, `package.json`, `pyproject.toml`, `bun.lockb`, `go.mod`, etc.) — fat polyglot image when needed.
+- Per-project image name: `sandcastle-<repo-basename>`. Each repo has its own.
+- Secrets extracted on-demand by `/sandcastle-build` / `/sandcastle-run` (Keychain on macOS, `gh auth token`) with `.sandcastle/.env` as Linux/override fallback. No `scripts/claude-oauth-env.sh` in the repo.
+- v1 repos must be migrated manually: remove `.sandcastle/main.mts`, `scripts/claude-oauth-env.sh`, `sandcastle:build`/`sandcastle:run` from `package.json`, and `@ai-hero/sandcastle` + `tsx` from devDeps. Then re-run `/sandcastle-init --force`.
 
 ## Two operating modes
 
@@ -43,13 +50,13 @@ If the smoke run completes with `<promise>COMPLETE</promise>` in the output, the
 ### Mode 1: smoke / dev (no env overrides)
 
 ```bash
-source scripts/claude-oauth-env.sh
-bun run sandcastle:run
+/sandcastle-run
 ```
 
 - `branchStrategy: { type: 'head' }` — read-only run, no commits.
 - `promptFile: .sandcastle/prompt.md` — the smoke template.
-- Use this to validate auth + Docker pipeline. **Always run smoke after `sandcastle:build` to catch broken state early.**
+- The slash command extracts `CLAUDE_CODE_OAUTH_TOKEN` from the Keychain (macOS) or `.sandcastle/.env` (Linux/override) before invoking the orchestrator.
+- Use this to validate auth + Docker pipeline. **Always run smoke after `/sandcastle-build` to catch broken state early.**
 
 ### Mode 2: AFK dispatch (driven by `/sandcastle-dispatch-wave`)
 
@@ -104,7 +111,7 @@ These are the non-obvious failure modes. Knowing them up front saves hours of de
 
 Running `npx @ai-hero/sandcastle init --template blank --agent claude-code` looks fully-flagged but still pops an interactive UI (Ink-based) asking to pick a sandbox provider (Docker/Podman). There is no `--sandbox docker` flag. From a non-TTY script, the process hangs forever waiting for input.
 
-**Fix:** the `/sandcastle-init` slash command (this plugin) bypasses the CLI and writes the files directly from templates. The templates were extracted from `node_modules/@ai-hero/sandcastle/dist/templates/blank/` and `dist/InitService.js`.
+**Fix:** the `/sandcastle-init` slash command (this plugin) bypasses the CLI and writes the files directly from snippets. In v2 the snippets live in `${CLAUDE_PLUGIN_ROOT}/templates/snippets/` and are composed per-project by the detector; the base + agent snippets were derived from `node_modules/@ai-hero/sandcastle/dist/templates/blank/` and `dist/InitService.js`.
 
 **Where to grep if it changes:** `dist/InitService.js` — search for `TEMPLATES`, `AGENT_REGISTRY`, `CLAUDE_CODE_DOCKERFILE`, and `GITIGNORE` constants. The `.env.example` content per agent lives next to `AGENT_REGISTRY` entries. The interactive prompt for sandbox provider is wired in `dist/cli.js`.
 
@@ -114,7 +121,7 @@ The Sandcastle docker provider starts the container with `--user $HOST_UID:$HOST
 
 When the container starts as UID 501 (macOS) and tools try to write `/home/agent/.gitconfig`, `~/.claude/...`, etc., they get **Permission denied**. Most failures cascade silently — `claude --print` exits with code 0 producing no output.
 
-**Fix in the Dockerfile** (this plugin's template already does it):
+**Fix in the snippet** (the plugin's `templates/snippets/agent.dockerfile` already does it — this is the LAST snippet in every composed Dockerfile, regardless of which runtimes were detected):
 
 ```dockerfile
 USER root
@@ -131,7 +138,7 @@ Sticky bit world-writable on `/home/agent` and direct subdirs. The host UID can 
 
 Even after the chmod fix, the installer leaves a `/home/agent/.claude.json` config file with mode `-rw-------` (600, owner-only). When the container starts as UID 501, that file is unreadable. Claude Code reads it on startup, gets EACCES, and **hangs forever** in `--print` mode without surfacing an error. `--output-format stream-json` exits cleanly with no output (worse — looks like a successful empty run); `--output-format json` and plain text mode time out.
 
-**Fix in the Dockerfile** (this plugin's template already does it):
+**Fix in the snippet** (the plugin's `templates/snippets/agent.dockerfile` already does it):
 
 ```dockerfile
 RUN curl -fsSL https://claude.ai/install.sh | bash \
@@ -149,22 +156,24 @@ Wipe the installer's owner-only state files. Claude Code will recreate them at r
 Sandcastle saw the container start, sent the prompt to `claude --print`, and got nothing back for 10 minutes. Almost always one of the three gotchas above (typically gotcha 3). To diagnose:
 
 ```bash
-# Manual repro — run claude --print inside the container with the same env:
-source scripts/claude-oauth-env.sh
+# Manual repro — run claude --print inside the container with the same env.
+# v2: image name is per-project; read from .sandcastle/config.json.
+IMG=$(jq -r '.imageName' .sandcastle/config.json)
+TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null)
 docker run --rm --user 501:20 \
   -e HOME=/home/agent \
-  -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
-  --entrypoint bash sandcastle-max:latest \
+  -e CLAUDE_CODE_OAUTH_TOKEN="$TOKEN" \
+  --entrypoint bash "$IMG" \
   -c 'echo "say only: pong" | timeout 30 claude --print --dangerously-skip-permissions --output-format json -p - 2>&1; echo "EXIT=$?"'
 ```
 
-- If you get a JSON response with `"result":"pong"` → `claude` works in the container; the issue is Sandcastle wiring (check `main.mts` env propagation).
-- If you get exit 124 (timeout) → claude is hanging on something. Check `.claude.json` perms inside the image: `docker run --rm --user 501:20 --entrypoint bash sandcastle-max:latest -c 'cat /home/agent/.claude.json'`. If "Permission denied" → gotcha 3, rebuild image.
+- If you get a JSON response with `"result":"pong"` → `claude` works in the container; the issue is Sandcastle wiring (check the plugin runtime's `main.mts` env propagation).
+- If you get exit 124 (timeout) → claude is hanging on something. Check `.claude.json` perms inside the image: `docker run --rm --user 501:20 --entrypoint bash "$IMG" -c 'cat /home/agent/.claude.json'`. If "Permission denied" → gotcha 3, rebuild image with `/sandcastle-build --no-cache`.
 - If you get exit 0 with no output → same as above, gotcha 3.
 
 ### Token leaked accidentally during debug
 
-The `claude-oauth-env.sh` script never prints the token, but ad-hoc `env | grep CLAUDE` or similar can. **If a token is exposed in logs/conversation:** `claude setup-token` again — it overwrites the Keychain entry. The old access token remains technically valid until its `expiresAt`, so refresh sooner rather than later.
+The v2 slash commands never print the token, but ad-hoc `env | grep CLAUDE` or similar can. **If a token is exposed in logs/conversation:** `claude setup-token` again — it overwrites the Keychain entry. The old access token remains technically valid until its `expiresAt`, so refresh sooner rather than later.
 
 When debugging in shell, never inspect env vars containing tokens — use existence checks only:
 ```bash
@@ -227,48 +236,53 @@ If it's no longer 0.5.x, expect some of the above to have moved. The symbols are
 ## Architecture summary
 
 ```
-┌─────────────── Host (macOS or Linux) ───────────────┐
-│                                                     │
-│  Keychain ── claude-oauth-env.sh ──► env CLAUDE_CODE_OAUTH_TOKEN
-│                                          │          │
-│                              source'd in shell      │
-│                                          │          │
-│  bun run sandcastle:run                  ▼          │
-│       │                                             │
-│       └─► npx tsx .sandcastle/main.mts              │
-│                  │                                  │
-│                  ▼                                  │
-│             sandcastle.run({                        │
-│               agent: claudeCode(model, {            │
-│                 env: { CLAUDE_CODE_OAUTH_TOKEN }    │
-│               }),                                   │
-│               sandbox: docker(),                    │
-│               promptFile: ".sandcastle/prompt.md",  │
-│             })                                      │
-│                  │                                  │
-│                  ▼                                  │
-│         spawn Docker container                      │
-│         --user 501:20                               │
-│         -e HOME=/home/agent                         │
-│         -e CLAUDE_CODE_OAUTH_TOKEN=...              │
-│         -v <repo>:/home/agent/workspace             │
-│                  │                                  │
-└──────────────────┼──────────────────────────────────┘
+┌─────────────── Host (macOS or Linux) ─────────────────────────────┐
+│                                                                   │
+│  Keychain  ─── /sandcastle-run extracts on-demand ────┐           │
+│                                                       ▼           │
+│                                              CLAUDE_CODE_OAUTH_TOKEN
+│                                                       │           │
+│  /sandcastle-run                                      ▼           │
+│       │                                                           │
+│       └─► node ${CLAUDE_PLUGIN_ROOT}/runtime/main.mts             │
+│                  │   (cwd = user's repo;                          │
+│                  │    reads .sandcastle/config.json)              │
+│                  ▼                                                │
+│             sandcastle.run({                                      │
+│               agent: claudeCode(model, {                          │
+│                 env: { CLAUDE_CODE_OAUTH_TOKEN }                  │
+│               }),                                                 │
+│               sandbox: docker({                                   │
+│                 imageName: config.imageName  ← per-project        │
+│               }),                                                 │
+│               promptFile: config.promptFile,                      │
+│             })                                                    │
+│                  │                                                │
+│                  ▼                                                │
+│         spawn Docker container                                    │
+│         --user 501:20                                             │
+│         -e HOME=/home/agent                                       │
+│         -e CLAUDE_CODE_OAUTH_TOKEN=...                            │
+│         -v <repo>:/home/agent/workspace                           │
+│                  │                                                │
+└──────────────────┼────────────────────────────────────────────────┘
                    ▼
-        ┌─── Container ─────────┐
-        │  /home/agent (1777)   │
-        │  /home/agent/.local/  │
-        │    bin/claude → ...   │
-        │                       │
-        │  claude --print -p -  │
-        │    │  (auth via OAuth)│
-        │    ▼                  │
-        │  Anthropic API        │
-        │    │                  │
-        │    ▼                  │
-        │  stream-json output   │
-        │    │                  │
-        └────┼──────────────────┘
+        ┌─── Container (sandcastle-<repo>) ────────────┐
+        │  /home/agent (1777)                          │
+        │  /home/agent/.local/bin/claude → installer   │
+        │                                              │
+        │  + runtimes detected per project:            │
+        │    .NET SDK, Node, Bun, Python, Go, ...      │
+        │                                              │
+        │  claude --print -p -                         │
+        │    │  (auth via OAuth)                       │
+        │    ▼                                         │
+        │  Anthropic API                               │
+        │    │                                         │
+        │    ▼                                         │
+        │  stream-json output                          │
+        └──────────────────────────────────────────────┘
+             │
              ▼
      Sandcastle parses lines,
      emits to .sandcastle/logs/main.log,

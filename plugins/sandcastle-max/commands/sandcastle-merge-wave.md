@@ -23,21 +23,33 @@ set -e
 
 # Hard checks — abort if any fail.
 git rev-parse --show-toplevel >/dev/null || { echo "✗ not a git repo"; exit 1; }
-[[ -f .sandcastle/main.mts ]] || { echo "✗ .sandcastle/ not scaffolded — run /sandcastle-init first"; exit 1; }
+[[ -f .sandcastle/config.json ]] || { echo "✗ .sandcastle/ not scaffolded — run /sandcastle-init first"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "✗ Docker daemon not running"; exit 1; }
 gh repo view --json nameWithOwner --jq .nameWithOwner >/dev/null || { echo "✗ gh repo unresolved"; exit 1; }
-docker image inspect sandcastle-max >/dev/null 2>&1 || { echo "✗ sandcastle-max image not built — run 'bun run sandcastle:build'"; exit 1; }
 
-# Auto-recover OAuth token: if missing, attempt to source the helper.
+# Read per-project image name from config (v2 scaffold).
+IMAGE_NAME=$(jq -r '.imageName' .sandcastle/config.json)
+[[ -n "$IMAGE_NAME" && "$IMAGE_NAME" != "null" ]] || { echo "✗ imageName missing from .sandcastle/config.json"; exit 1; }
+export IMAGE_NAME
+docker image inspect "$IMAGE_NAME" >/dev/null 2>&1 || { echo "✗ image '$IMAGE_NAME' not built — run /sandcastle-build"; exit 1; }
+
+# Bootstrap plugin runtime if missing (one-time).
+if [[ ! -d "${CLAUDE_PLUGIN_ROOT}/runtime/node_modules" ]]; then
+  echo "✓ bootstrapping plugin runtime (one-time)..."
+  (cd "${CLAUDE_PLUGIN_ROOT}/runtime" && (bun install || npm install)) >/dev/null
+fi
+
+# Auto-recover OAuth token: Keychain → .sandcastle/.env fallback.
 if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-  if [[ -f scripts/claude-oauth-env.sh ]]; then
-    set +e
-    source scripts/claude-oauth-env.sh 2>&1 | tail -5
-    set -e
+  CLAUDE_CODE_OAUTH_TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+  if [[ -z "$CLAUDE_CODE_OAUTH_TOKEN" && -f .sandcastle/.env ]]; then
+    CLAUDE_CODE_OAUTH_TOKEN=$(grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' .sandcastle/.env | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
   fi
-  [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] || {
-    echo "✗ CLAUDE_CODE_OAUTH_TOKEN missing and auto-source failed."
-    echo "  Try manually: source scripts/claude-oauth-env.sh"
+  export CLAUDE_CODE_OAUTH_TOKEN
+  [[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]] || {
+    echo "✗ CLAUDE_CODE_OAUTH_TOKEN missing — not in Keychain and no .sandcastle/.env."
+    echo "  macOS: run 'claude setup-token' then re-run."
+    echo "  Linux: paste token into .sandcastle/.env."
     exit 1
   }
 fi
@@ -53,7 +65,7 @@ if [[ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
   }
 fi
 
-echo "✓ pre-flight passed (oauth=present gh_token=present docker=ok image=ok)"
+echo "✓ pre-flight passed (oauth=present gh_token=present docker=ok image=$IMAGE_NAME)"
 
 # Detect base branch (HEAD donde estamos parados). El merge-wave debe
 # correr desde la misma branch desde la cual se lanzó el dispatch.
@@ -98,7 +110,7 @@ PRs descartados (no listos):
   PR #48  (#2)  → afk-checks-failed
   PR #49  (#4)  → agent-rejected (round previo: scope creep)
 
-Image: sandcastle-max  ·  Model: claude-opus-4-7  ·  Reviewers paralelos: N
+Image: $IMAGE_NAME  ·  Model: claude-opus-4-7  ·  Reviewers paralelos: N
 
 Lanzar review wave? [y/N/select <PR numbers comma-separated>]:
 ```
@@ -147,7 +159,7 @@ for PR_N in $REVIEW_SET; do
     SANDCASTLE_ROLE="reviewer" \
     SANDCASTLE_PR_NUMBER="$PR_N" \
     SANDCASTLE_PROMPT_FILE="$REVIEW_PROMPT" \
-      bunx tsx .sandcastle/main.mts > "$LOG" 2>&1 &
+      "${CLAUDE_PLUGIN_ROOT}/runtime/node_modules/.bin/tsx" "${CLAUDE_PLUGIN_ROOT}/runtime/main.mts" > "$LOG" 2>&1 &
     echo $! > ".sandcastle/review-logs/pr-${PR_N}.pid"
   )
 done
@@ -323,7 +335,7 @@ done
 SANDCASTLE_MODEL="claude-opus-4-7" \
 SANDCASTLE_ROLE="coordinator" \
 SANDCASTLE_PROMPT_FILE=".sandcastle/coordinator-prompt.md" \
-  bunx tsx .sandcastle/main.mts > .sandcastle/coordinator-logs/$(date +%Y%m%d-%H%M%S).log 2>&1
+  "${CLAUDE_PLUGIN_ROOT}/runtime/node_modules/.bin/tsx" "${CLAUDE_PLUGIN_ROOT}/runtime/main.mts" > .sandcastle/coordinator-logs/$(date +%Y%m%d-%H%M%S).log 2>&1
 ```
 
 ### Coordinator prompt template
@@ -404,7 +416,7 @@ for PR in "${MERGE_ORDER[@]}"; do
   fi
 
   # 2. Validar con sandcastle-validate local (Fase 3)
-  if ! scripts/sandcastle-validate.sh $PR; then
+  if ! "${CLAUDE_PLUGIN_ROOT}/scripts/sandcastle-validate.sh" $PR; then
     echo "  ✗ afk-checks failed post-rebase — skipping merge"
     continue
   fi
@@ -442,7 +454,7 @@ resolve_conflict() {
   SANDCASTLE_BRANCH="$BRANCH" \
   SANDCASTLE_BASE_BRANCH="$SANDCASTLE_BASE_BRANCH" \
   SANDCASTLE_PROMPT_FILE=".sandcastle/resolver-prompts/pr-${PR}.md" \
-    bunx tsx .sandcastle/main.mts > ".sandcastle/resolver-logs/pr-${PR}.log" 2>&1
+    "${CLAUDE_PLUGIN_ROOT}/runtime/node_modules/.bin/tsx" "${CLAUDE_PLUGIN_ROOT}/runtime/main.mts" > ".sandcastle/resolver-logs/pr-${PR}.log" 2>&1
 
   # Parsear output
   if grep -q "<resolution>RESOLVED</resolution>" ".sandcastle/resolver-logs/pr-${PR}.log"; then
@@ -549,7 +561,7 @@ for PR in $BLOCK_IMPLEMENTATION_SET; do
   SANDCASTLE_BRANCH=$(gh pr view $PR --json headRefName --jq .headRefName) \
   SANDCASTLE_BASE_BRANCH="$SANDCASTLE_BASE_BRANCH" \
   SANDCASTLE_PROMPT_FILE=".sandcastle/fixer-prompts/pr-${PR}.md" \
-    bunx tsx .sandcastle/main.mts > ".sandcastle/fixer-logs/pr-${PR}.log" 2>&1 &
+    "${CLAUDE_PLUGIN_ROOT}/runtime/node_modules/.bin/tsx" "${CLAUDE_PLUGIN_ROOT}/runtime/main.mts" > ".sandcastle/fixer-logs/pr-${PR}.log" 2>&1 &
 done
 ```
 
@@ -616,5 +628,5 @@ Save wave report como JSON estructurado en `.sandcastle/wave-reports/<timestamp>
 - **`/review` de Matt Pocock está in-progress** al momento de escribir (2026-05-13). Cuando gradúe a `skills/engineering/` stable, agregar Fase 6: dos-axis review (Standards + Spec) en el reviewer. Implica disparar 2 sub-agentes general-purpose dentro de cada container reviewer, aggregator sin merge/rerank, output bajo `## Standards Review` y `## Spec Review`.
 - **El conflict-resolver es intent-aware**, no syntax-aware. Si en práctica vemos resolvers que mergean "simplificando" (regresión silenciosa), reforzar los criterios de no-regresión en el prompt y considerar añadir checks programáticos (diff contra brief expected outputs).
 - **El fixer-container puede entrar en loop infinito**. El cap de 2 rounds (`fixer-round-1`, `fixer-round-2`) es la guardia. Si Leo ve `manual-intervention` con frecuencia, el brief estaba mal-escrito desde el origen — actualizar `/agent-brief` skill upstream.
-- **Sin GH Actions**: `sandcastle-validate` corre local (Fase 3 — `scripts/sandcastle-validate.sh`). Si por alguna razón hace falta validar en GH (cloud build, secrets remotos), agregar un step opcional en Step 8 — pero por default todo es local.
+- **Sin GH Actions**: `sandcastle-validate` corre local (Fase 3 — `${CLAUDE_PLUGIN_ROOT}/scripts/sandcastle-validate.sh`, ya no copiado al repo en v2). Si por alguna razón hace falta validar en GH (cloud build, secrets remotos), agregar un step opcional en Step 8 — pero por default todo es local.
 - **Quota Max y Opus**: una ola de N reviewers + 1 coordinator + posibles resolver/fixer containers consume rápido la ventana de 5h. Limitar `--max-parallel` a 3-4 con Opus. Si quota se agota mid-wave, abortar y aplicar label `quota-exhausted` (manejo formal en Fase 5 con `/sandcastle-pipeline`).

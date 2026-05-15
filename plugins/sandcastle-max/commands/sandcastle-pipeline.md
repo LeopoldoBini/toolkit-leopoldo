@@ -26,7 +26,7 @@ loop:
   │       wait all PIDs                                              │
   │                                                                  │
   │  3. Polling local cada 30s sobre PRs lanzados:                   │
-  │       scripts/sandcastle-validate.sh $PR  (Fase 3)               │
+  │       ${CLAUDE_PLUGIN_ROOT}/scripts/sandcastle-validate.sh $PR    │
   │       timeout: 30 min default                                    │
   │       PRs que excedan timeout → label `slow-ci`, no entran a    │
   │         merge-wave esta iteración                                │
@@ -50,16 +50,30 @@ Mismo pre-flight que dispatch-wave y merge-wave. Run via un SINGLE bash invocati
 set -e
 
 git rev-parse --show-toplevel >/dev/null || { echo "✗ not a git repo"; exit 1; }
-[[ -f .sandcastle/main.mts ]] || { echo "✗ .sandcastle/ not scaffolded"; exit 1; }
+[[ -f .sandcastle/config.json ]] || { echo "✗ .sandcastle/ not scaffolded — run /sandcastle-init"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "✗ Docker daemon not running"; exit 1; }
 gh repo view --json nameWithOwner --jq .nameWithOwner >/dev/null || { echo "✗ gh repo unresolved"; exit 1; }
-docker image inspect sandcastle-max >/dev/null 2>&1 || { echo "✗ sandcastle-max image not built"; exit 1; }
 
-# OAuth + GH token auto-recovery (igual que dispatch-wave)
-[[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && {
-  [[ -f scripts/claude-oauth-env.sh ]] && { set +e; source scripts/claude-oauth-env.sh 2>&1 | tail -3; set -e; }
-  [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && { echo "✗ CLAUDE_CODE_OAUTH_TOKEN missing"; exit 1; }
-}
+# Read per-project image name from config (v2 scaffold).
+IMAGE_NAME=$(jq -r '.imageName' .sandcastle/config.json)
+[[ -n "$IMAGE_NAME" && "$IMAGE_NAME" != "null" ]] || { echo "✗ imageName missing from .sandcastle/config.json"; exit 1; }
+export IMAGE_NAME
+docker image inspect "$IMAGE_NAME" >/dev/null 2>&1 || { echo "✗ image '$IMAGE_NAME' not built — run /sandcastle-build"; exit 1; }
+
+# Bootstrap plugin runtime if missing (one-time).
+if [[ ! -d "${CLAUDE_PLUGIN_ROOT}/runtime/node_modules" ]]; then
+  (cd "${CLAUDE_PLUGIN_ROOT}/runtime" && (bun install || npm install)) >/dev/null
+fi
+
+# OAuth auto-recovery: Keychain → .sandcastle/.env fallback (v2 — no scripts/ in repo).
+if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+  CLAUDE_CODE_OAUTH_TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+  if [[ -z "$CLAUDE_CODE_OAUTH_TOKEN" && -f .sandcastle/.env ]]; then
+    CLAUDE_CODE_OAUTH_TOKEN=$(grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' .sandcastle/.env | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+  fi
+  export CLAUDE_CODE_OAUTH_TOKEN
+  [[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]] || { echo "✗ CLAUDE_CODE_OAUTH_TOKEN missing (neither Keychain nor .sandcastle/.env)"; exit 1; }
+fi
 [[ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]] && {
   gh auth status >/dev/null 2>&1 && export GH_TOKEN=$(gh auth token)
   [[ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]] && { echo "✗ No GH_TOKEN"; exit 1; }
@@ -245,7 +259,7 @@ pipeline_poll_validate() {
 
     local NEXT_PENDING=()
     for PR in "${PENDING[@]}"; do
-      if scripts/sandcastle-validate.sh "$PR" >/dev/null 2>&1; then
+      if "${CLAUDE_PLUGIN_ROOT}/scripts/sandcastle-validate.sh" "$PR" >/dev/null 2>&1; then
         DONE+=("$PR")
         echo "  ✓ PR #$PR validate passed"
       elif [[ $? -ge 2 ]]; then

@@ -33,9 +33,10 @@ Workaround for Sandcastle [issue #191](https://github.com/mattpocock/sandcastle/
 
    3. Validate local (este plugin, Fase 3)
    ───────────────────────────────────────
-   scripts/sandcastle-validate.sh $PR
-        │  docker run --rm liviano (oven/bun:latest u override)
-        │  bun install + typecheck + test sobre worktree fresh
+   ${CLAUDE_PLUGIN_ROOT}/scripts/sandcastle-validate.sh $PR
+        │  docker run --rm liviano (la per-project sandcastle image del repo,
+        │    leída de .sandcastle/config.json — fallback a oven/bun:latest)
+        │  install + typecheck + test per stack detectado (Node/.NET/Python/Go)
         │  → label afk-checks-passed o afk-checks-failed + comentario al PR
         ▼
 
@@ -66,7 +67,11 @@ Workaround for Sandcastle [issue #191](https://github.com/mattpocock/sandcastle/
 
 ### Slash commands
 
-- **`/sandcastle-init`** — scaffolds `.sandcastle/` in any repo: Dockerfile (with chmod 1777 fix + Claude installer state cleanup), env-var-driven `main.mts`, prompt template, `.env.example`, `scripts/claude-oauth-env.sh` (Keychain → env, no leak), package.json scripts, `.gitignore` updates. **Idempotent** — refuses to overwrite without `--force`.
+- **`/sandcastle-init`** *(v0.6.0 stack-aware)* — detects the project's runtimes from manifests/lockfiles (`.csproj`, `package.json`, `bun.lockb`, `pyproject.toml`, `go.mod`, etc.) and composes a per-project `Dockerfile` from the plugin's snippet registry (Debian base + matching runtime snippets + Claude Code agent layer with UID surgery). Scaffolds **only** `.sandcastle/` in the user repo: `Dockerfile`, `config.json`, `prompt.md`, `.env.example`, `.gitignore`. **Does NOT** touch `package.json`, **does NOT** create `scripts/`, **does NOT** install JS deps. The orchestrator (`main.mts` + `@ai-hero/sandcastle`) lives in the plugin. Idempotent — refuses to overwrite without `--force`. Generator fallback for unknown stacks (subagent + WebFetch to official install docs) writes to `.sandcastle/snippets/<stack>.dockerfile` for user review.
+
+- **`/sandcastle-build`** *(v0.6.0)* — builds the per-project Docker image. Reads `imageName` from `.sandcastle/config.json` (default `sandcastle-<repo-basename>`). Auto-bootstraps plugin runtime deps on first run.
+
+- **`/sandcastle-run`** *(v0.6.0)* — runs the smoke prompt. Extracts `CLAUDE_CODE_OAUTH_TOKEN` from macOS Keychain on-demand (fallback to `.sandcastle/.env` on Linux), invokes the plugin orchestrator. No `source scripts/...` step needed.
 
 - **`/sandcastle-dispatch-wave`** *(v0.5.0)* — wave-based AFK dispatcher. Reads the GH issue dependency graph (parsing `## Blocked by` from issue bodies), detects eligible issues (label `ready-for-agent` o `state/ready-for-agent` + all deps closed + no open PR), shows preview, asks confirmation, then launches one Docker container per eligible issue in parallel. **Soporta feature branches y worktrees** — detecta el HEAD actual como base (no asume `main`), naming `agent/<base-slug>/issue-N` evita colisiones. **Default Opus 4.7** (parametrizable vía `SANDCASTLE_MODEL`). Self-check vs brief antes del PR. Subtipos de BLOCKED (`BRIEF_AMBIGUOUS`, `CODEBASE_UNEXPECTED`, `DEPENDENCY_MISSING`) para ruteo downstream.
 
@@ -76,11 +81,11 @@ Workaround for Sandcastle [issue #191](https://github.com/mattpocock/sandcastle/
 
 - **`/afk-pr-triage`** *(legacy, v0.4.0)* — deterministic PR triage (typecheck/tests + parsing de acceptance criteria), sin juicio sobre código. **Reemplazado por `/sandcastle-merge-wave`** en v0.5.0. Se mantiene como fallback para casos donde no querés gastar Opus en review (proyectos muy chicos o calibración inicial).
 
-### Scripts ejecutables
+### Scripts ejecutables (en el plugin, no en el repo del usuario)
 
-- **`scripts/sandcastle-validate.sh <PR_NUMBER>`** *(v0.5.0)* — local CI gate. Corre typecheck + tests en container Docker liviano (default `oven/bun:latest`) sobre worktree fresh del PR. Aplica labels `afk-checks-passed` / `afk-checks-failed` + postea error truncado como comentario en el PR si falla. Sin Claude Code adentro. Reemplaza el workflow remoto `afk-checks.yml`. Customizable vía `SANDCASTLE_VALIDATOR_IMAGE` env var o `.sandcastle/validate.cmds` archivo del proyecto.
+- **`${CLAUDE_PLUGIN_ROOT}/scripts/sandcastle-validate.sh <PR_NUMBER>`** *(v0.5.0, multi-stack en v0.6.0)* — local CI gate. Corre typecheck + tests en container Docker liviano sobre worktree fresh del PR. **v0.6.0:** default usa la per-project image del repo (`imageName` de `.sandcastle/config.json`) — ya tiene los runtimes correctos instalados. Defaults multi-stack: detecta `package.json` + lockfile (bun/pnpm/yarn/npm), `*.csproj`/`*.sln` (.NET), `pyproject.toml`/`requirements.txt` (Python), `go.mod` (Go). Aplica labels `afk-checks-passed` / `afk-checks-failed` + comentario en el PR si falla. Customizable vía `SANDCASTLE_VALIDATOR_IMAGE` env var o `.sandcastle/validate.cmds` archivo del proyecto.
 
-- **`scripts/claude-oauth-env.sh`** — Keychain (macOS) → `CLAUDE_CODE_OAUTH_TOKEN` env var. Sourceá antes de `bun run sandcastle:run`. En Linux/server, paste el token directo en `.sandcastle/.env`.
+*(v0.6.0 removed `scripts/claude-oauth-env.sh` — la lógica de extracción de Keychain ahora vive inline en `/sandcastle-build` y `/sandcastle-run` con fallback a `.sandcastle/.env`. Cero `scripts/` en el repo del usuario.)*
 
 ### Skill
 
@@ -91,29 +96,26 @@ Workaround for Sandcastle [issue #191](https://github.com/mattpocock/sandcastle/
 
 ## Usage
 
-### One-time setup per repo
+### One-time setup per repo (v0.6.0)
 
 ```
-/sandcastle-init
+/sandcastle-init                # detects stack, composes Dockerfile, writes .sandcastle/
 ```
 
 Then:
 
-```bash
+```
 claude setup-token              # one-time per machine, populates macOS Keychain
-source scripts/claude-oauth-env.sh
-bun run sandcastle:build        # 1-3 min first time (downloads node:22 + Bun + gh CLI + Claude Code)
-bun run sandcastle:run          # smoke prompt to verify everything works
+/sandcastle-build               # 2-5 min first time, depends on runtimes detected
+/sandcastle-run                 # smoke prompt to verify everything works
 ```
 
 If smoke prints `<promise>COMPLETE</promise>`, you're set.
 
 ### Daily AFK execution
 
-```bash
-source scripts/claude-oauth-env.sh
-export GH_TOKEN=$(gh auth token)
-/sandcastle-dispatch-wave
+```
+/sandcastle-dispatch-wave       # secrets extracted automatically from Keychain + gh auth token
 ```
 
 The dispatcher will:
@@ -160,29 +162,42 @@ This makes wave-based ops uniform: one command for first-try and retries.
 - **Sandcastle hardcodes** `--user $HOST_UID:$HOST_GID` and `HOME=/home/agent`. The Dockerfile is shaped around those constraints. If Sandcastle changes that, the Dockerfile may need adjustment — see the `sandcastle-afk` skill's grep map.
 - **Concurrency capped by dep graph.** The dispatcher launches all eligible at once. If your dep graph naturally serializes (e.g. all issues block on a single foundation), the wave will be size 1.
 
-## Files in this plugin (v0.5.0)
+## Files in this plugin (v0.6.0)
 
 ```
 sandcastle-max/
 ├── plugin.json
 ├── README.md                                     ← this file
 ├── commands/
-│   ├── sandcastle-init.md                        ← /sandcastle-init (scaffolding)
-│   ├── sandcastle-dispatch-wave.md               ← /sandcastle-dispatch-wave (feature branches + self-check)
-│   ├── sandcastle-merge-wave.md                  ← /sandcastle-merge-wave (NEW: review + merge orquestado)
-│   ├── sandcastle-pipeline.md                    ← /sandcastle-pipeline (NEW: integrador con checkpoints)
-│   └── afk-pr-triage.md                          ← /afk-pr-triage (legacy, reemplazado por merge-wave)
+│   ├── sandcastle-init.md                        ← /sandcastle-init (stack-aware scaffolding, v2)
+│   ├── sandcastle-build.md                       ← /sandcastle-build (NEW v0.6.0)
+│   ├── sandcastle-run.md                         ← /sandcastle-run (NEW v0.6.0)
+│   ├── sandcastle-dispatch-wave.md               ← /sandcastle-dispatch-wave
+│   ├── sandcastle-merge-wave.md                  ← /sandcastle-merge-wave
+│   ├── sandcastle-pipeline.md                    ← /sandcastle-pipeline
+│   └── afk-pr-triage.md                          ← /afk-pr-triage (legacy)
 ├── skills/
 │   └── sandcastle-afk/
 │       └── SKILL.md                              ← troubleshooting + architecture + grep map
+├── runtime/                                      ← NEW v0.6.0: orchestrator out of user repos
+│   ├── main.mts                                  ← reads .sandcastle/config.json from cwd
+│   ├── package.json                              ← @ai-hero/sandcastle + tsx (deps)
+│   └── node_modules/                             ← bootstrapped on first /sandcastle-build (~95MB)
 ├── templates/
-│   ├── Dockerfile                                ← fixed (chmod 1777 + .claude.json cleanup)
-│   ├── main.mts                                  ← env-var-driven, default Opus 4.7
-│   ├── prompt.md                                 ← smoke test placeholder
-│   └── env.example                               ← CLAUDE_CODE_OAUTH_TOKEN + GH_TOKEN
+│   ├── prompt.md                                 ← smoke test placeholder (copied to repo)
+│   ├── env.example                               ← CLAUDE_CODE_OAUTH_TOKEN + GH_TOKEN (copied to repo)
+│   └── snippets/                                 ← NEW v0.6.0: per-runtime Dockerfile fragments
+│       ├── base.dockerfile                       ← FROM debian:bookworm-slim + git/curl/gh
+│       ├── agent.dockerfile                      ← Claude Code install + UID surgery (always last)
+│       ├── dotnet.dockerfile
+│       ├── node.dockerfile
+│       ├── bun.dockerfile
+│       ├── python.dockerfile
+│       ├── go.dockerfile
+│       ├── ruby.dockerfile
+│       └── rust.dockerfile
 └── scripts/
-    ├── claude-oauth-env.sh                       ← Keychain → CLAUDE_CODE_OAUTH_TOKEN
-    └── sandcastle-validate.sh                    ← NEW: local CI gate (reemplaza afk-checks.yml)
+    └── sandcastle-validate.sh                    ← local CI gate (multi-stack defaults v0.6.0)
 ```
 
 ## Related plugins in this marketplace
@@ -190,6 +205,18 @@ sandcastle-max/
 - **engineering-workflow** *(>=2.1.0)* — the pipeline that produces the agent briefs you feed to Sandcastle. `/triage` and `/agent-brief` enforce the **single-brief invariant** (edit, do not duplicate) which `/sandcastle-dispatch-wave` consumes. Without v2.1.0, multiple briefs may exist per issue and the dispatcher's "latest wins" rule can be inconsistent — strongly prefer >=2.1.0.
 
 ## Version history
+
+- **0.6.0** *(2026-05-15)* — **Stack-aware scaffold** (rediseño completo de `sandcastle-init`).
+  - Disparador: imagen fija Bun + Node 22 rompía la verificación del agente en proyectos .NET / Python / Go (no podía correr `dotnet test`, `pytest`, etc.).
+  - Detector de runtimes desde manifests/lockfiles (root + 1 nivel de subdirs) con multi-stack detect-all → fat Dockerfile per-project.
+  - Composición vía snippets en `templates/snippets/`: `base.dockerfile` → snippets de runtimes detectados → `agent.dockerfile` (UID surgery + Claude Code, siempre último). Base de `node:22-bookworm` → `debian:bookworm-slim` para neutralidad de stack.
+  - Per-project image: `imageName = sandcastle-<repo-basename>` (antes: una sola imagen global `sandcastle-max`).
+  - Orchestrator (`main.mts` + `@ai-hero/sandcastle` + `tsx`) movido al plugin (`runtime/`). El repo del usuario ya no necesita `package.json` ni instala deps JS — proyectos .NET/Python/Go puros funcionan nativos.
+  - Slash commands nuevos `/sandcastle-build` y `/sandcastle-run` reemplazan `bun run sandcastle:build/run`. Secrets extraídos on-demand del Keychain (macOS) con fallback a `.sandcastle/.env` (Linux/override) — sin `scripts/claude-oauth-env.sh` en el repo.
+  - Generador fallback para stacks unknown (Elixir, Swift, etc.): subagente con WebFetch a docs oficiales escribe `.sandcastle/snippets/<stack>.dockerfile` para review manual antes del primer build.
+  - Versionado híbrido: cada snippet tiene una "blessed version", override per-project vía `versions: { dotnet: "9.0" }` en `.sandcastle/config.json`.
+  - Sin backward compat — cutoff duro. Repos v0.5.x se migran manual: borrar `.sandcastle/main.mts`, `scripts/claude-oauth-env.sh`, scripts `sandcastle:*` de `package.json`, devDeps `@ai-hero/sandcastle` + `tsx`. Luego `/sandcastle-init --force`.
+  - `sandcastle-validate.sh`: defaults multi-stack (Node/Bun/.NET/Python/Go), usa la per-project image del repo por default.
 
 - **0.5.0** — Rediseño Opus everywhere + merge-agent + feature branches (5 fases del plan 2026-05-13).
   - `templates/main.mts`: modelo parametrizable vía `SANDCASTLE_MODEL` env var, default Opus 4.7. Lee `SANDCASTLE_BASE_BRANCH` para logging.

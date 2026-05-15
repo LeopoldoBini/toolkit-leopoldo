@@ -25,22 +25,33 @@ set -e
 
 # Hard checks — abort if any fail.
 git rev-parse --show-toplevel >/dev/null || { echo "✗ not a git repo"; exit 1; }
-[[ -f .sandcastle/main.mts ]] || { echo "✗ .sandcastle/ not scaffolded — run /sandcastle-init first"; exit 1; }
+[[ -f .sandcastle/config.json ]] || { echo "✗ .sandcastle/ not scaffolded — run /sandcastle-init first"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "✗ Docker daemon not running"; exit 1; }
 gh repo view --json nameWithOwner --jq .nameWithOwner >/dev/null || { echo "✗ gh repo unresolved"; exit 1; }
-docker image inspect sandcastle-max >/dev/null 2>&1 || { echo "✗ sandcastle-max image not built — run '<pkg-mgr> sandcastle:build' (pnpm/bun/npm/yarn según el proyecto)"; exit 1; }
 
-# Auto-recover OAuth token: if missing, attempt to source the helper.
+# Read per-project image name from config (v2 scaffold).
+IMAGE_NAME=$(jq -r '.imageName' .sandcastle/config.json)
+[[ -n "$IMAGE_NAME" && "$IMAGE_NAME" != "null" ]] || { echo "✗ imageName missing from .sandcastle/config.json"; exit 1; }
+export IMAGE_NAME
+docker image inspect "$IMAGE_NAME" >/dev/null 2>&1 || { echo "✗ image '$IMAGE_NAME' not built — run /sandcastle-build"; exit 1; }
+
+# Bootstrap plugin runtime if missing (one-time).
+if [[ ! -d "${CLAUDE_PLUGIN_ROOT}/runtime/node_modules" ]]; then
+  echo "✓ bootstrapping plugin runtime (one-time)..."
+  (cd "${CLAUDE_PLUGIN_ROOT}/runtime" && (bun install || npm install)) >/dev/null
+fi
+
+# Auto-recover OAuth token: Keychain → .sandcastle/.env fallback.
 if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-  if [[ -f scripts/claude-oauth-env.sh ]]; then
-    set +e
-    source scripts/claude-oauth-env.sh 2>&1 | tail -5
-    set -e
+  CLAUDE_CODE_OAUTH_TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+  if [[ -z "$CLAUDE_CODE_OAUTH_TOKEN" && -f .sandcastle/.env ]]; then
+    CLAUDE_CODE_OAUTH_TOKEN=$(grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' .sandcastle/.env | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
   fi
-  [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] || {
-    echo "✗ CLAUDE_CODE_OAUTH_TOKEN missing and auto-source failed."
-    echo "  Try manually: source scripts/claude-oauth-env.sh"
-    echo "  On Linux/server: paste token into .sandcastle/.env (no Keychain)."
+  export CLAUDE_CODE_OAUTH_TOKEN
+  [[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]] || {
+    echo "✗ CLAUDE_CODE_OAUTH_TOKEN missing — not in Keychain and no .sandcastle/.env."
+    echo "  macOS: run 'claude setup-token' then re-run."
+    echo "  Linux: paste token into .sandcastle/.env."
     exit 1
   }
 fi
@@ -57,7 +68,7 @@ if [[ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
   }
 fi
 
-echo "✓ pre-flight passed (oauth=present gh_token=present docker=ok image=ok)"
+echo "✓ pre-flight passed (oauth=present gh_token=present docker=ok image=$IMAGE_NAME)"
 
 # Detectar base branch (HEAD donde estamos parados) y slug para naming.
 # Soporta feature branches y worktrees — el dispatch parte desde HEAD y los
@@ -126,7 +137,7 @@ Issues blocked (waiting for upstream):
 Issues SKIPPED (require your input first):
   #14 VS8 — agent-blocked: brief unclear about share token expiry behavior
 
-Image: sandcastle-max  ·  Mode: parallel  ·  Concurrency: N (natural wave size)
+Image: $IMAGE_NAME  ·  Mode: parallel  ·  Concurrency: N (natural wave size)
 
 Launch wave? [y/N/select <issue numbers comma-separated>]:
 ```
@@ -303,7 +314,8 @@ for N in $LAUNCH_SET; do
     SANDCASTLE_BRANCH="$ISSUE_BRANCH" \
     SANDCASTLE_BASE_BRANCH="$SANDCASTLE_BASE_BRANCH" \
     SANDCASTLE_PROMPT_FILE="$ISSUE_PROMPT" \
-      bunx tsx .sandcastle/main.mts > "$LOG" 2>&1 &
+      "${CLAUDE_PLUGIN_ROOT}/runtime/node_modules/.bin/tsx" \
+      "${CLAUDE_PLUGIN_ROOT}/runtime/main.mts" > "$LOG" 2>&1 &
     echo $! > ".sandcastle/logs/issue-${N}.pid"
   )
 done

@@ -1,6 +1,6 @@
 ---
 name: merge-orchestrate
-description: Run the merge-orchestrator skill — serial intent-aware merge of N open PRs in the current repo. Same flow as the skill auto-invocation, but explicit and discoverable via /help. Usage; `/merge-orchestrate` (auto-discover PRs) or `/merge-orchestrate #5,#7,#9` (explicit list). Flags; --strategy=merge|rebase, --step, --dry-run.
+description: Run the merge-orchestrator skill — serial intent-aware merge of N open PRs in the current repo. Same flow as the skill auto-invocation, but explicit and discoverable via /help. Usage: `/merge-orchestrate` (auto-discover PRs) or `/merge-orchestrate #5,#7,#9` (explicit list). Flags: --strategy=merge|rebase, --step, --dry-run.
 ---
 
 # /merge-orchestrate

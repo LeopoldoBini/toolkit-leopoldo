@@ -4,6 +4,8 @@ Run [@ai-hero/sandcastle](https://github.com/mattpocock/sandcastle) (AFK Claude 
 
 Workaround for Sandcastle [issue #191](https://github.com/mattpocock/sandcastle/issues/191) (subscription auth — marked **wontfix** by the maintainer).
 
+**v0.7.0 — anti-mock + reality-first testing.** Declarative `.sandcastle/resources.json` lets the project list its external dependencies (DBs, APIs, queues) with `mandatory` or `optional` policy. The dispatcher probes them from the host (Level 1) before launching anything; the agent re-probes from inside the container (Level 2) and diffs the brief against the real schema (Level 3); mandatory resources cannot be mocked; tests follow red-green-reality-first per acceptance criterion. New BLOCKED subtypes: `RESOURCE_UNREACHABLE`, `SCHEMA_MISMATCH`, `TEST_NOOP`. See "Anti-mock + reality-first" below.
+
 ## End-to-end flow (how Leo and Claude use this together)
 
 **v0.5.0** introdujo el flujo Opus-everywhere con merge-agent y validator local. El ciclo AFK ahora es completamente managed por este plugin — sin GH Actions, sin `/triage` manual (gracias a engineering-workflow >=2.1.0).
@@ -143,11 +145,64 @@ This makes wave-based ops uniform: one command for first-try and retries.
 - The Sandcastle maintainer chose not to support this in core (issue #191 wontfix). The workaround is non-obvious enough to deserve a packaged solution.
 - Wave-based dispatch + dep-graph reading + failure isolation are not in Sandcastle either — they're operational concerns that emerged when running this against a real 12-issue MVP.
 
-## What this plugin does NOT do (v0.5.0)
+## Anti-mock + reality-first (v0.7.0)
+
+The problem this solves: AFK agents producing tests that pass against in-memory mocks while the real DB/API has a different schema. Tests are green, the PR merges, prod breaks on the first request that touches the divergent column.
+
+### The contract
+
+The project declares its external resources in `.sandcastle/resources.json` (a `resources.json.example` is scaffolded by `/sandcastle-init` with examples for postgres, http, redis, kafka, and s3). Each resource has:
+
+- `name` — stable identifier (e.g. `main-db`).
+- `type` — for documentation only (`postgres`, `http`, `redis`, `kafka`, `s3`, etc.).
+- `env_required` — env vars the probe needs. Read from the host environment + `.sandcastle/.env` fallback, then propagated into the container via `agentEnv`.
+- `connectivity_probe` — bash one-liner that succeeds (exit 0) if the resource is reachable. Run at both Level 1 (host) and Level 2 (container).
+- `schema_introspect` — optional bash one-liner that emits a textual representation of the resource's schema (table list, column list, OpenAPI doc, topic list, etc.). Output cached by the dispatcher to `.sandcastle/probes/<name>.schema` so per-issue prompts can reference it.
+- `policy` — `mandatory` (cannot be mocked, abort/block on probe failure) or `optional` (probe runs but failure is a warning).
+
+### The 3 defense levels
+
+| Level | Where | When | On failure |
+|---|---|---|---|
+| 1 | Host (dispatcher pre-flight) | Before launching ANY container | mandatory: abort dispatch with actionable error; optional: warn |
+| 2 | Inside container (Step 0 of prompt) | Before agent writes any code | mandatory: `<promise>BLOCKED</promise> + <block-reason>RESOURCE_UNREACHABLE</block-reason>` |
+| 3 | Inside container (Step 0.b of prompt) | After Level 2 passes, against `schema_introspect` cache | `<block-reason>SCHEMA_MISMATCH</block-reason>` with detail of which brief references don't match real schema |
+
+Why all three: host and container can have different networking (DNS, firewalls, VPN); host probe alone catches credentials but not container-side connectivity. Schema diff catches the "brief says `users.email_address`, real table has `users.email`" case that destroys AFK trust.
+
+### Red-green-reality-first
+
+Inside the container, for each acceptance criterion in the brief:
+
+```
+RED:    Write ONE test that exercises this criterion against the REAL mandatory resource.
+        No mocks for mandatory resources. Run it. It MUST fail.
+        If it passes -> BLOCKED with TEST_NOOP.
+GREEN:  Minimal code to pass this test against the real resource. Commit.
+        Run it. It MUST pass.
+```
+
+Not the same as `/tdd-vertical` (which is interactive, has refactor phase, requires user confirmation). This is the AFK-constrained variant: contract-driven, reality-first, no user in loop.
+
+### New BLOCKED subtypes (v0.7.0)
+
+- `RESOURCE_UNREACHABLE` → label `agent-blocked-resource`. Container can't probe a mandatory resource. Fix env or networking.
+- `SCHEMA_MISMATCH` → label `agent-blocked-schema`. Brief assumptions don't match reality. Edit brief or run migration.
+- `TEST_NOOP` → label `agent-blocked-noop`. Could not write a test that fails before implementation. Brief may be too vague to be testable.
+
+## What this plugin does NOT do (v0.7.0)
 
 - **Brief authoring.** Briefs come from the `engineering-workflow` plugin's `/agent-brief` and `/triage` skills. Este plugin **consume** el último `## Agent Brief` comment del issue. Si no existe, dispatch-wave aborta con error accionable.
 - **Cross-cutting decisions.** El brief linkea a docs del proyecto (ej. `docs/phase1-decisions.md`); el agente las lee on-demand inside the container. El dispatcher NO los inlinea.
 - **Standards review.** El reviewer actual evalúa solo Spec (¿la implementación honra el contrato?). El eje Standards (CLAUDE.md, CONTEXT.md, ADRs) se incorpora en Fase 6 cuando `/review` de Matt Pocock gradúe a stable.
+
+**Cambios v0.7.0 (anti-mock + reality-first):**
+- ✓ **`.sandcastle/resources.json`** declarativo: DB/HTTP/queue/etc con policy mandatory|optional.
+- ✓ **3 niveles de probe** (host pre-flight, container connectivity, schema diff).
+- ✓ **3 nuevos BLOCKED subtypes**: `RESOURCE_UNREACHABLE`, `SCHEMA_MISMATCH`, `TEST_NOOP`.
+- ✓ **Anti-mock policy**: el agente NO puede mockear recursos mandatory.
+- ✓ **Red-green-reality-first** por criterio de aceptación (no horizontal slicing).
+- ✓ **`runtime/main.mts` propaga `env_required`** al `agentEnv` del container.
 
 **Cambios v0.5.0 (lo que SÍ hace ahora que antes no):**
 - ✓ **PR review automático** (era humano-only): `/sandcastle-merge-wave` con Opus reviewer.
@@ -162,31 +217,32 @@ This makes wave-based ops uniform: one command for first-try and retries.
 - **Sandcastle hardcodes** `--user $HOST_UID:$HOST_GID` and `HOME=/home/agent`. The Dockerfile is shaped around those constraints. If Sandcastle changes that, the Dockerfile may need adjustment — see the `sandcastle-afk` skill's grep map.
 - **Concurrency capped by dep graph.** The dispatcher launches all eligible at once. If your dep graph naturally serializes (e.g. all issues block on a single foundation), the wave will be size 1.
 
-## Files in this plugin (v0.6.0)
+## Files in this plugin (v0.7.0)
 
 ```
 sandcastle-max/
 ├── plugin.json
 ├── README.md                                     ← this file
 ├── commands/
-│   ├── sandcastle-init.md                        ← /sandcastle-init (stack-aware scaffolding, v2)
-│   ├── sandcastle-build.md                       ← /sandcastle-build (NEW v0.6.0)
-│   ├── sandcastle-run.md                         ← /sandcastle-run (NEW v0.6.0)
-│   ├── sandcastle-dispatch-wave.md               ← /sandcastle-dispatch-wave
+│   ├── sandcastle-init.md                        ← /sandcastle-init (stack-aware + resources.json v0.7.0)
+│   ├── sandcastle-build.md                       ← /sandcastle-build
+│   ├── sandcastle-run.md                         ← /sandcastle-run
+│   ├── sandcastle-dispatch-wave.md               ← /sandcastle-dispatch-wave (3-level probes + RGR v0.7.0)
 │   ├── sandcastle-merge-wave.md                  ← /sandcastle-merge-wave
 │   ├── sandcastle-pipeline.md                    ← /sandcastle-pipeline
 │   └── afk-pr-triage.md                          ← /afk-pr-triage (legacy)
 ├── skills/
 │   └── sandcastle-afk/
 │       └── SKILL.md                              ← troubleshooting + architecture + grep map
-├── runtime/                                      ← NEW v0.6.0: orchestrator out of user repos
-│   ├── main.mts                                  ← reads .sandcastle/config.json from cwd
+├── runtime/
+│   ├── main.mts                                  ← propagates resources.json env_required (v0.7.0)
 │   ├── package.json                              ← @ai-hero/sandcastle + tsx (deps)
 │   └── node_modules/                             ← bootstrapped on first /sandcastle-build (~95MB)
 ├── templates/
 │   ├── prompt.md                                 ← smoke test placeholder (copied to repo)
 │   ├── env.example                               ← CLAUDE_CODE_OAUTH_TOKEN + GH_TOKEN (copied to repo)
-│   └── snippets/                                 ← NEW v0.6.0: per-runtime Dockerfile fragments
+│   ├── resources.json.example                    ← NEW v0.7.0: per-project external resources registry
+│   └── snippets/                                 ← per-runtime Dockerfile fragments
 │       ├── base.dockerfile                       ← FROM debian:bookworm-slim + git/curl/gh
 │       ├── agent.dockerfile                      ← Claude Code install + UID surgery (always last)
 │       ├── dotnet.dockerfile
@@ -197,7 +253,7 @@ sandcastle-max/
 │       ├── ruby.dockerfile
 │       └── rust.dockerfile
 └── scripts/
-    └── sandcastle-validate.sh                    ← local CI gate (multi-stack defaults v0.6.0)
+    └── sandcastle-validate.sh                    ← local CI gate (multi-stack defaults)
 ```
 
 ## Related plugins in this marketplace
@@ -205,6 +261,20 @@ sandcastle-max/
 - **engineering-workflow** *(>=2.1.0)* — the pipeline that produces the agent briefs you feed to Sandcastle. `/triage` and `/agent-brief` enforce the **single-brief invariant** (edit, do not duplicate) which `/sandcastle-dispatch-wave` consumes. Without v2.1.0, multiple briefs may exist per issue and the dispatcher's "latest wins" rule can be inconsistent — strongly prefer >=2.1.0.
 
 ## Version history
+
+- **0.7.0** *(2026-05-15)* — **Anti-mock + reality-first testing**.
+  - Disparador: AFK agents estaban produciendo tests que pasaban contra mocks mientras la DB real tenía schema divergente. PRs verdes en CI, prod rota.
+  - `.sandcastle/resources.json` declarativo per-project: cada recurso externo declara `name`, `type`, `env_required`, `connectivity_probe`, `schema_introspect`, `policy` (`mandatory`|`optional`).
+  - `templates/resources.json.example` con 5 tipos de ejemplo (postgres, http, redis, kafka, s3); `/sandcastle-init` lo copia + genera `.sandcastle/resources.json` por default.
+  - **Level 1 probe** (host): `/sandcastle-dispatch-wave` pre-flight corre `connectivity_probe` desde el host. Mandatory fail → abort dispatch con error accionable. Output de `schema_introspect` cacheado a `.sandcastle/probes/<name>.schema` para uso downstream.
+  - **Level 2 probe** (container): el prompt template tiene Step 0 que re-corre `connectivity_probe` desde adentro del container. Fail → `<promise>BLOCKED</promise> + <block-reason>RESOURCE_UNREACHABLE</block-reason>`.
+  - **Level 3 probe** (container): Step 0.b diffea el brief contra el schema real (parsea refs a tablas/columnas/endpoints en el brief). Mismatch → `<block-reason>SCHEMA_MISMATCH</block-reason>` con detalle de disparidades. El agente NO intenta "arreglar" el brief — es decisión humana.
+  - `runtime/main.mts` parsea `resources.json` y propaga `env_required` al `agentEnv` que ve el container. Sin esto, el container no tendría credenciales para los probes.
+  - **Red-green-reality-first** en el prompt template: para cada criterio de aceptación, un test que falle contra el recurso real → impl mínima → pasa. Vertical, no horizontal. Anti-pattern explícito: "no batch tests".
+  - Nuevo subtype `TEST_NOOP` para cuando el agente no puede escribir un test que falle antes de la implementación (señal de que el criterio del brief es testeable solo con mocks → bloqueo).
+  - Nuevos labels de routing: `agent-blocked-resource`, `agent-blocked-schema`, `agent-blocked-noop`.
+  - Anti-mock policy explícito: recursos `mandatory` NO se pueden mockear. Si el agente no puede alcanzar el real, BLOQUEA — no substituye.
+  - Backward compat: repos sin `.sandcastle/resources.json` siguen funcionando (warning + skip de probes). Para activar enforcement, ejecutar `/sandcastle-init` (copia el example).
 
 - **0.6.0** *(2026-05-15)* — **Stack-aware scaffold** (rediseño completo de `sandcastle-init`).
   - Disparador: imagen fija Bun + Node 22 rompía la verificación del agente en proyectos .NET / Python / Go (no podía correr `dotnet test`, `pytest`, etc.).

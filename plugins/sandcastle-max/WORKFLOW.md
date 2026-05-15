@@ -6,6 +6,8 @@ How Leo and Claude use this plugin together. **One page**, every step explicit. 
 
 Leo writes a PRD → breaks it into GH issues with vertical-slice agent briefs → Claude (this plugin) reads the briefs and orchestrates Docker containers, one per issue, that run Claude Code AFK against the user's Max subscription. Each container opens a PR. CI gates the PRs by tier (foundations hold for human review, verticals auto-merge on green). Leo wakes up to a wave summary; reviews foundations; merges; runs the dispatcher again for the next wave. Repeat until the MVP ships.
 
+**v0.7.0 addition**: before any container implements anything, the plugin enforces a 3-level reality check against resources the project declares in `.sandcastle/resources.json` (DB, APIs, queues). Host probes connectivity; container re-probes connectivity; container diffs the brief against the real schema. Tests then follow red-green-reality-first per acceptance criterion — no mocks for mandatory resources, ever. The whole loop is designed so an agent cannot ship a green PR that mocks divergent reality.
+
 ## The four moments
 
 ### Moment 1 — Setup (one-time per repo)
@@ -28,6 +30,7 @@ Leo writes a PRD → breaks it into GH issues with vertical-slice agent briefs �
 - `gh auth status` works — auto-recovered to `GH_TOKEN` by pre-flight.
 - `CLAUDE_CODE_OAUTH_TOKEN` available — auto-extracted from macOS Keychain (or fallback to `.sandcastle/.env` on Linux) by pre-flight.
 - Per-project image already built — checks `.sandcastle/config.json`'s `imageName` against `docker image inspect`. If not, prints `run /sandcastle-build`.
+- **(v0.7.0)** `.sandcastle/resources.json` declares external resources; `env_required` vars must be set on the host (Keychain / `.env`); each `mandatory` resource's `connectivity_probe` must pass from the host. **Level 1 probes run automatically as part of pre-flight** — a mandatory failure aborts dispatch before any container is launched.
 
 **Leo:** `/sandcastle-dispatch-wave`
 
@@ -111,6 +114,12 @@ Per Leo's request: is the workflow above truly implicit in the plugin, or does i
 | `docs/phase1-decisions.md` (or any project-specific decisions doc) | △ | Dispatcher prompt template references it but acknowledges projects may not have one. The agent reads CLAUDE.md unconditionally; the decisions doc only if the brief mentions a P-anchor. |
 | Pre-condition env vars (`CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN`) | ✓ | Dispatcher pre-flight + scaffolded `.env.example` |
 | Cleanup of stale agent branches before retry | ✓ | `commands/sandcastle-dispatch-wave.md` step 4.3 |
+| External resources declaration (DB/HTTP/queue) | ✓ (v0.7.0) | `templates/resources.json.example` scaffolded by `/sandcastle-init` into `.sandcastle/resources.json` |
+| Level 1 host probe (anti-mock pre-flight) | ✓ (v0.7.0) | `commands/sandcastle-dispatch-wave.md` pre-flight block — reads `resources.json`, runs `connectivity_probe` from host, aborts dispatch on mandatory fail |
+| Level 2 container probe (RESOURCE_UNREACHABLE) | ✓ (v0.7.0) | Prompt template Step 0 + completion signal subtype + monitor label routing (`agent-blocked-resource`) |
+| Level 3 schema diff (SCHEMA_MISMATCH) | ✓ (v0.7.0) | Prompt template Step 0.b — compares brief refs against `.sandcastle/probes/<name>.schema` cached from Level 1 introspect |
+| Resource env propagation (host → container) | ✓ (v0.7.0) | `runtime/main.mts` parses `resources.json` and adds `env_required` to `agentEnv` |
+| Red-green-reality-first (anti-horizontal) | ✓ (v0.7.0) | Prompt template step 2 (replaces "implement the slice") + anti-patterns + TEST_NOOP subtype |
 
 ### Gaps identified (and acceptable)
 

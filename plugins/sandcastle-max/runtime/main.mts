@@ -51,6 +51,43 @@ if (ghToken) {
   agentEnv.GH_TOKEN = ghToken;
 }
 
+// Propagate env_required vars declared in .sandcastle/resources.json into the
+// container so the agent can re-run connectivity_probe / schema_introspect from
+// inside (Level 2 + Level 3 probes). Without this, the container has no
+// credentials for the user's databases / APIs / queues and mocks become the
+// only path forward.
+const resourcesPath = resolve(repoRoot, ".sandcastle/resources.json");
+if (existsSync(resourcesPath)) {
+  try {
+    const resourcesDoc = JSON.parse(readFileSync(resourcesPath, "utf-8"));
+    const resources = Array.isArray(resourcesDoc.resources)
+      ? resourcesDoc.resources
+      : [];
+    const propagated: string[] = [];
+    for (const r of resources) {
+      const envList: string[] = Array.isArray(r.env_required)
+        ? r.env_required
+        : [];
+      for (const ev of envList) {
+        const val = process.env[ev];
+        if (val !== undefined && agentEnv[ev] === undefined) {
+          agentEnv[ev] = val;
+          propagated.push(ev);
+        }
+      }
+    }
+    if (propagated.length > 0) {
+      console.log(
+        `[sandcastle-max] propagated ${propagated.length} resource env var(s) to container: ${propagated.join(", ")}`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `[sandcastle-max] WARNING: could not parse .sandcastle/resources.json (${(err as Error).message}). Resource env vars NOT propagated — agent will fail Level 2 probes.`,
+    );
+  }
+}
+
 const issueNumber = process.env.SANDCASTLE_ISSUE_NUMBER;
 const branchName = process.env.SANDCASTLE_BRANCH;
 const baseBranch = process.env.SANDCASTLE_BASE_BRANCH;

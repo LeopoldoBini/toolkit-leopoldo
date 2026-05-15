@@ -151,6 +151,11 @@ From `${CLAUDE_PLUGIN_ROOT}/templates/` into the repo:
 
 - `prompt.md` → `<repo>/.sandcastle/prompt.md` (skip if exists and not `--force`)
 - `env.example` → `<repo>/.sandcastle/.env.example` (already v2-correct — no patching needed)
+- `resources.json.example` → `<repo>/.sandcastle/resources.json.example` (always copied verbatim; reference for what schema is supported)
+
+If `<repo>/.sandcastle/resources.json` does not exist, also copy `resources.json.example` → `<repo>/.sandcastle/resources.json` so the user has a working starting point. Print: "Copied default resources.json — edit it to declare the DBs, APIs, queues, etc. that AFK agents must verify reachable before implementing. Set `policy: mandatory` on resources where the agent must NOT mock."
+
+If `<repo>/.sandcastle/resources.json` already exists, skip it (idempotency) unless `--force`.
 
 Create `<repo>/.sandcastle/.gitignore` with:
 
@@ -198,6 +203,9 @@ For real AFK execution (after smoke passes):
 
 Customization:
 - Edit .sandcastle/config.json to change model, override versions, etc.
+- Edit .sandcastle/resources.json to declare external resources AFK agents must verify
+  (databases, APIs, queues). mandatory resources cannot be mocked and abort dispatch on
+  probe failure. See .sandcastle/resources.json.example for the full schema.
 - Drop a snippet at .sandcastle/snippets/extras.dockerfile for ad-hoc additions
   (auto-included on next /sandcastle-init).
 - Override a built-in snippet by creating .sandcastle/snippets/<name>.dockerfile.

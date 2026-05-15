@@ -70,6 +70,99 @@ fi
 
 echo "✓ pre-flight passed (oauth=present gh_token=present docker=ok image=$IMAGE_NAME)"
 
+# Level 1 probe — host-side resource reachability.
+# Reads .sandcastle/resources.json (per-project declarative resource registry).
+# For each resource with policy=mandatory: verifies env_required are set, runs
+# connectivity_probe FROM THE HOST. Any failure aborts dispatch before launching
+# a single container. Optional resources are probed too but failures are warnings.
+# Schema introspect outputs are cached to .sandcastle/probes/<resource>.schema so
+# the per-issue prompts can reference them in Step 0.b (Level 3 probe).
+if [[ -f .sandcastle/resources.json ]]; then
+  echo "✓ resources.json found — running Level 1 probes (host-side)..."
+  mkdir -p .sandcastle/probes
+  RESOURCES_FAILED=()
+  RESOURCES_OPTIONAL_FAILED=()
+  # Validate JSON before iterating.
+  jq -e . .sandcastle/resources.json >/dev/null || { echo "✗ .sandcastle/resources.json is not valid JSON"; exit 1; }
+
+  RESOURCE_COUNT=$(jq '.resources | length' .sandcastle/resources.json)
+  for IDX in $(seq 0 $((RESOURCE_COUNT - 1))); do
+    R_NAME=$(jq -r ".resources[$IDX].name" .sandcastle/resources.json)
+    R_TYPE=$(jq -r ".resources[$IDX].type" .sandcastle/resources.json)
+    R_POLICY=$(jq -r ".resources[$IDX].policy // \"optional\"" .sandcastle/resources.json)
+    R_PROBE=$(jq -r ".resources[$IDX].connectivity_probe" .sandcastle/resources.json)
+    R_INTROSPECT=$(jq -r ".resources[$IDX].schema_introspect // empty" .sandcastle/resources.json)
+
+    # Verify env_required are set on the host.
+    ENV_MISSING=()
+    ENV_COUNT=$(jq ".resources[$IDX].env_required | length" .sandcastle/resources.json)
+    for EIDX in $(seq 0 $((ENV_COUNT - 1))); do
+      EVAR=$(jq -r ".resources[$IDX].env_required[$EIDX]" .sandcastle/resources.json)
+      if [[ -z "${!EVAR:-}" ]]; then
+        # Try to source from .sandcastle/.env as fallback.
+        if [[ -f .sandcastle/.env ]]; then
+          EVAL=$(grep -E "^${EVAR}=" .sandcastle/.env | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+          if [[ -n "$EVAL" ]]; then
+            export "$EVAR=$EVAL"
+            continue
+          fi
+        fi
+        ENV_MISSING+=("$EVAR")
+      fi
+    done
+
+    if [[ ${#ENV_MISSING[@]} -gt 0 ]]; then
+      if [[ "$R_POLICY" == "mandatory" ]]; then
+        echo "  ✗ $R_NAME ($R_TYPE) [mandatory] — missing env: ${ENV_MISSING[*]}"
+        RESOURCES_FAILED+=("$R_NAME: missing env ${ENV_MISSING[*]}")
+      else
+        echo "  ⚠ $R_NAME ($R_TYPE) [optional] — missing env: ${ENV_MISSING[*]} (skipping probe)"
+        RESOURCES_OPTIONAL_FAILED+=("$R_NAME")
+      fi
+      continue
+    fi
+
+    # Run probe.
+    if bash -c "$R_PROBE" 2>/tmp/probe-err-$R_NAME; then
+      echo "  ✓ $R_NAME ($R_TYPE) reachable"
+      # If introspect command exists, cache its output for Level 3.
+      if [[ -n "$R_INTROSPECT" ]]; then
+        if bash -c "$R_INTROSPECT" >".sandcastle/probes/${R_NAME}.schema" 2>/dev/null; then
+          echo "      schema introspected -> .sandcastle/probes/${R_NAME}.schema"
+        fi
+      fi
+    else
+      ERR=$(cat /tmp/probe-err-$R_NAME 2>/dev/null | head -3)
+      if [[ "$R_POLICY" == "mandatory" ]]; then
+        echo "  ✗ $R_NAME ($R_TYPE) [mandatory] — probe FAILED: $ERR"
+        RESOURCES_FAILED+=("$R_NAME: $ERR")
+      else
+        echo "  ⚠ $R_NAME ($R_TYPE) [optional] — probe failed: $ERR"
+        RESOURCES_OPTIONAL_FAILED+=("$R_NAME")
+      fi
+    fi
+    rm -f /tmp/probe-err-$R_NAME
+  done
+
+  if [[ ${#RESOURCES_FAILED[@]} -gt 0 ]]; then
+    echo ""
+    echo "✗ ABORT: ${#RESOURCES_FAILED[@]} mandatory resource(s) failed pre-flight."
+    echo "  Containers would mock these and produce false-green tests. Fix before retry:"
+    for F in "${RESOURCES_FAILED[@]}"; do echo "    - $F"; done
+    echo ""
+    echo "  Edit .sandcastle/.env or .sandcastle/resources.json then re-run."
+    exit 1
+  fi
+
+  # Persist the list of mandatory resource names so the agent prompt can reference them.
+  jq -r '.resources[] | select(.policy == "mandatory") | .name' .sandcastle/resources.json \
+    > .sandcastle/probes/.mandatory-resources
+  echo "✓ Level 1 probes passed (mandatory: $(wc -l < .sandcastle/probes/.mandatory-resources | tr -d ' '), optional skipped: ${#RESOURCES_OPTIONAL_FAILED[@]})"
+else
+  echo "⚠ no .sandcastle/resources.json — agents may mock external resources without detection."
+  echo "  Recommended: copy .sandcastle/resources.json.example and declare your DBs/APIs/queues."
+fi
+
 # Detectar base branch (HEAD donde estamos parados) y slug para naming.
 # Soporta feature branches y worktrees — el dispatch parte desde HEAD y los
 # PRs se abren contra esa misma branch (no hardcoded a main).
@@ -209,6 +302,45 @@ issue body and discussion are context only — this brief is the contract.
 
 ## What you must do
 
+0. **Reality check (BLOCKING — do this before touching code).** Open `.sandcastle/resources.json` if it exists.
+
+   For each resource with `policy: mandatory`:
+
+   a. **Level 2 — Connectivity from inside the container.** Run the resource's `connectivity_probe`. Networking from host vs container can differ (DNS, firewalls, container-only env). If the probe fails here even though the dispatcher's Level 1 probe passed, it's still a hard block:
+      ```bash
+      gh issue comment {{N}} --body "@LeopoldoBini blocked: resource '<name>' unreachable from container. Probe error: <error>. The dispatcher (host) could reach it, the container can't. Likely networking/DNS issue."
+      gh issue edit {{N}} --add-label agent-blocked
+      ```
+      Then emit:
+      ```
+      <promise>BLOCKED</promise>
+      <block-reason>RESOURCE_UNREACHABLE</block-reason>
+      ```
+      Do NOT proceed to step 1.
+
+   b. **Level 3 — Schema diff against brief.** If `.sandcastle/probes/<name>.schema` exists (cached by host pre-flight), re-run the resource's `schema_introspect` from inside the container and diff vs the brief's assumptions:
+      - Extract every reference in the brief (sección "Your contract" arriba) to tables, columns, endpoints, topics, bucket keys, etc.
+      - For each reference: confirm it exists in the introspected schema.
+      - Build a mismatch list: missing tables, renamed columns, type changes, missing endpoints.
+      - If the mismatch list is non-empty:
+        ```bash
+        gh issue comment {{N}} --body "@LeopoldoBini blocked: schema mismatch between brief and real <resource>. Detail:
+        - Brief mentions \`users.email_address\` but real schema has \`users.email\` (typo?)
+        - Brief mentions table \`orders\` but real schema has no such table
+        - <etc>"
+        gh issue edit {{N}} --add-label agent-blocked
+        ```
+        Then emit:
+        ```
+        <promise>BLOCKED</promise>
+        <block-reason>SCHEMA_MISMATCH</block-reason>
+        ```
+        Do NOT attempt to "fix" the brief by guessing the correct column — that's the human's call.
+
+   c. **NEVER mock a mandatory resource.** If `.sandcastle/probes/.mandatory-resources` lists a resource, you MUST exercise tests against the real resource. Substituting a mock, fixture, or in-memory double for a mandatory resource is a contract violation — emit BLOCKED with `<block-reason>RESOURCE_UNREACHABLE</block-reason>` rather than mocking.
+
+   Only after all mandatory resources pass Level 2 + Level 3 do you proceed to step 1.
+
 1. **Install dependencies inside the container.** The bind-mounted workspace does NOT include `node_modules` (host-built artifacts wouldn't work cross-platform anyway). Detect the package manager from lockfiles and install with the frozen-lockfile flag so you get the exact versions the repo expects:
    - `pnpm-lock.yaml` present → `pnpm install --frozen-lockfile`
    - `bun.lockb` or `bun.lock` present → `bun install --frozen-lockfile`
@@ -217,7 +349,26 @@ issue body and discussion are context only — this brief is the contract.
 
    This usually takes 1-5 minutes for large repos; it's a one-time cost per dispatch.
 
-2. Implement the contract above — produce a complete vertical slice (schema → API → UI → tests, as applicable).
+2. **Implement the contract via red-green-reality-first.** Each acceptance criterion is implemented as a tracer bullet against the REAL mandatory resources (no mocks). For each criterion in the brief, in order:
+
+   **RED.** Write ONE test that exercises the behavior of this criterion. The test MUST hit the real resource (DB, API, queue) declared `mandatory` in `.sandcastle/resources.json`. No `jest.mock`, no `vi.mock`, no `Mock.Of`, no in-memory doubles, no fixtures-pretending-to-be-real. If the only data path this criterion exercises is a mandatory resource, you MUST go through it.
+
+   Run the test. It MUST fail.
+
+   - If it passes without any implementation, the test is a no-op (asserts something trivially true, doesn't actually exercise the resource, or the behavior already exists somewhere). STOP and emit `<promise>BLOCKED</promise>` + `<block-reason>TEST_NOOP</block-reason>` with a comment explaining which criterion couldn't be reduced to a failing test.
+   - If it fails for the wrong reason (resource unreachable mid-test, syntax error, fixture missing), fix the test setup before proceeding — do NOT continue to GREEN.
+
+   **GREEN.** Write the MINIMUM code to make this one test pass against the real resource. Do not anticipate future criteria. Do not add behavior the test doesn't demand.
+
+   Run the test. It MUST pass.
+
+   Commit with a message linking the criterion: `feat(#{{N}}): <criterion summary>`.
+
+   Move on to the next criterion. Repeat RED → GREEN until every criterion in the brief has a passing test against real resources.
+
+   **Vertical, not horizontal.** Do NOT write all tests first then all code. Do NOT write all code first then add tests. One test, one impl, one commit — that order — per criterion. The slice is still vertical (schema → API → UI → tests is fine as the SHAPE of one tracer bullet), but the loop is one criterion at a time.
+
+   Optional resources (policy: optional in resources.json) MAY be mocked if necessary, but prefer real where possible. Mandatory resources NEVER.
 3. **Run the project's checks locally inside the container before committing.** Use whichever scripts the repo actually defines (read `package.json`'s `scripts` section); typical commands per package manager:
    - **pnpm:** `pnpm tsc --noEmit`, `pnpm test:run` (Vitest CI mode) or `pnpm test`, plus any `lint`/`analyze-changed` scripts the project exposes.
    - **bun:** `bun run typecheck` (or `tsc --noEmit`), `bun test`, plus `bun run typecheck:ui` / `bun run test:ui` if the project has them.
@@ -271,6 +422,9 @@ End your run with EXACTLY one of these tokens. The dispatcher reads them to dete
   - `<block-reason>BRIEF_AMBIGUOUS</block-reason>` — the brief is unclear, missing detail, or has contradictions. The reviewer can re-clarify and re-dispatch.
   - `<block-reason>CODEBASE_UNEXPECTED</block-reason>` — the codebase state doesn't match what the brief assumed (missing module, broken existing code, dep that doesn't exist).
   - `<block-reason>DEPENDENCY_MISSING</block-reason>` — work depends on something not yet merged (a sibling PR, an external service not deployed).
+  - `<block-reason>RESOURCE_UNREACHABLE</block-reason>` — a mandatory resource declared in `.sandcastle/resources.json` failed Level 2 (container connectivity) probe. The host could reach it but the container cannot — likely networking, DNS, firewall, or missing credentials in `agentEnv`.
+  - `<block-reason>SCHEMA_MISMATCH</block-reason>` — a mandatory resource is reachable but its actual schema does not match what the brief assumes (missing column, renamed table, wrong endpoint shape). Brief or migration is out of sync with reality. Human investigation needed — do NOT guess corrections.
+  - `<block-reason>TEST_NOOP</block-reason>` — during red-green-reality-first you wrote a test that PASSED before any implementation existed. This means the test is a no-op (asserts something trivial, or doesn't exercise the data path it claims to). Re-think the test against the real resource and BLOCK if you cannot make it fail correctly.
 
   **Before printing this, you MUST**:
   1. `gh issue comment {{N}} --body "@LeopoldoBini blocked: <reason>. Need clarification on <X>."`
@@ -289,6 +443,10 @@ End your run with EXACTLY one of these tokens. The dispatcher reads them to dete
 - Do not push to `{{BASE_BRANCH}}` directly — only to `{{BRANCH}}`.
 - Do not skip tests with `--no-verify` or `it.skip()` to make CI pass.
 - Do not invent API endpoints or types not described in the brief or implied by `CONTEXT.md`.
+- **Do not mock any resource declared `mandatory` in `.sandcastle/resources.json`.** If you cannot reach the real resource, emit `<promise>BLOCKED</promise>` with `<block-reason>RESOURCE_UNREACHABLE</block-reason>` — never substitute a mock to "make the test green".
+- **Do not guess corrections for schema mismatches.** If the brief says `users.email_address` and the real schema has `users.email`, BLOCK with `SCHEMA_MISMATCH`. Do not silently rename in your code — the brief may be right and the migration missing, or the brief may be stale and need to be edited. Human's call.
+- **Do not write tests that pass before the implementation exists.** If your "RED" test passes without code, it's a no-op. Re-design the test or BLOCK with `TEST_NOOP`.
+- **Do not batch tests.** Anti-horizontal: never write all tests for the brief first then all implementation. One criterion = one RED → one GREEN → one commit.
 ```
 
 When generating this file, substitute:
@@ -331,6 +489,9 @@ Then enter monitor mode:
   - `BLOCKED` → already commented + `agent-blocked` label applied by the agent. Additionally apply a subtype label based on `<block-reason>`:
     - `BRIEF_AMBIGUOUS` → label `agent-blocked-rebrief` (merge-wave/triage will re-clarify and re-dispatch)
     - `CODEBASE_UNEXPECTED` or `DEPENDENCY_MISSING` → label `agent-blocked-codebase` (human investigation needed)
+    - `RESOURCE_UNREACHABLE` → label `agent-blocked-resource` (fix networking, credentials, or `env_required` in `.sandcastle/resources.json`; do NOT re-dispatch until host AND container can probe the resource)
+    - `SCHEMA_MISMATCH` → label `agent-blocked-schema` (brief vs reality is out of sync; either update the brief to match the real schema or run the missing migration; never re-dispatch without resolving)
+    - `TEST_NOOP` → label `agent-blocked-noop` (the agent could not write a test that fails before implementation against the real resource; likely brief is too vague to test, or the resource introspect doesn't expose what the test needs)
     - If no subtype emitted → label `agent-blocked-unknown` and prompt user to inspect logs
   - idle timeout (`AgentIdleTimeoutError`) → `gh issue edit N --add-label agent-stuck` + `gh issue comment N --body "Agent idle-timed out. Inspect logs at $LOG. Re-run /sandcastle-dispatch-wave to retry."`
   - non-zero exit without COMPLETE/BLOCKED → `gh issue edit N --add-label agent-crashed` + `gh issue comment N --body "Agent crashed. Inspect logs at $LOG."`

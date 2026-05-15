@@ -1,0 +1,65 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LeopoldoBini/toolkit-leopoldo/main/plugins/sandcastle-max/templates/resources.schema.json",
+  "_doc": [
+    "Declarative list of external resources AFK agents must verify before implementing.",
+    "Each resource is probed in 3 levels of defense:",
+    "  Level 1 (host pre-flight): /sandcastle-dispatch-wave runs connectivity_probe from the host BEFORE launching ANY container.",
+    "  Level 2 (container): the agent re-runs connectivity_probe from INSIDE the container as Step 0; failure -> BLOCKED RESOURCE_UNREACHABLE.",
+    "  Level 3 (container): schema_introspect output is diff-ed against the brief; mismatch -> BLOCKED SCHEMA_MISMATCH.",
+    "",
+    "policy:",
+    "  mandatory  -> all 3 levels enforced; mocks forbidden; abort on fail.",
+    "  optional   -> probe runs but failure is a warning, not abort. Mocks tolerated.",
+    "",
+    "env_required: env vars the probe needs. dispatch-wave verifies they exist on the host AND propagates them to the container's agentEnv.",
+    "",
+    "Drop unused resources. Add as many as the project needs.",
+    "Delete this _doc field once you're set up."
+  ],
+  "resources": [
+    {
+      "name": "main-db",
+      "type": "postgres",
+      "env_required": ["DATABASE_URL"],
+      "connectivity_probe": "psql \"$DATABASE_URL\" -c 'SELECT 1' >/dev/null",
+      "schema_introspect": "psql \"$DATABASE_URL\" -Atc \"SELECT table_schema||'.'||table_name||'.'||column_name||':'||data_type FROM information_schema.columns WHERE table_schema NOT IN ('pg_catalog','information_schema') ORDER BY 1\"",
+      "policy": "mandatory"
+    },
+    {
+      "name": "auth-api",
+      "type": "http",
+      "env_required": ["AUTH_API_URL", "AUTH_API_TOKEN"],
+      "connectivity_probe": "curl -sf -m 5 -H \"Authorization: Bearer $AUTH_API_TOKEN\" \"$AUTH_API_URL/health\" >/dev/null",
+      "schema_introspect": "curl -sf -m 10 -H \"Authorization: Bearer $AUTH_API_TOKEN\" \"$AUTH_API_URL/openapi.json\"",
+      "policy": "mandatory"
+    },
+    {
+      "name": "cache",
+      "type": "redis",
+      "env_required": ["REDIS_URL"],
+      "connectivity_probe": "redis-cli -u \"$REDIS_URL\" PING | grep -q PONG",
+      "policy": "optional"
+    },
+    {
+      "name": "events",
+      "type": "kafka",
+      "env_required": ["KAFKA_BOOTSTRAP_SERVERS"],
+      "connectivity_probe": "kcat -b \"$KAFKA_BOOTSTRAP_SERVERS\" -L -m 5 >/dev/null",
+      "schema_introspect": "kcat -b \"$KAFKA_BOOTSTRAP_SERVERS\" -L -m 5 | grep -E '^ *topic '",
+      "policy": "optional"
+    },
+    {
+      "name": "object-store",
+      "type": "s3",
+      "env_required": ["S3_ENDPOINT", "S3_BUCKET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+      "connectivity_probe": "aws --endpoint-url \"$S3_ENDPOINT\" s3 ls \"s3://$S3_BUCKET/\" --max-items 1 >/dev/null",
+      "policy": "optional"
+    }
+  ],
+  "global_policy": {
+    "no_mocks_for_mandatory": true,
+    "abort_dispatch_on_probe_fail": true,
+    "block_agent_on_schema_mismatch": true,
+    "block_agent_on_test_noop": true
+  }
+}

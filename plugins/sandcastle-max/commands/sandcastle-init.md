@@ -191,9 +191,19 @@ Sandcastle scaffolded for: <basename> (runtimes: <list>)
 Next steps:
 1. (one-time) claude setup-token        ← skip if Keychain entry already exists (macOS) or
                                            set CLAUDE_CODE_OAUTH_TOKEN in .sandcastle/.env
-2. /sandcastle-build                    ← builds the per-project image
+2. Edit .sandcastle/resources.json      ← declare the external resources (DB/HTTP/queue/etc)
+                                           your AFK agents must verify before implementing.
+                                           Set policy=mandatory for resources that must NOT
+                                           be mocked. The example is a starting point.
+3. Add env vars to .sandcastle/.env     ← put the env_required vars from resources.json here
+                                           (DATABASE_URL, AUTH_API_TOKEN, etc).
+4. /sandcastle-probe-resources          ← bootstraps .sandcastle/probes/<name>.schema cache so
+                                           /to-issues and /agent-brief can anchor briefs to
+                                           real column names, endpoints, topics. Re-run after
+                                           schema migrations.
+5. /sandcastle-build                    ← builds the per-project image
                                            (takes 2-5 min first time; cached after)
-3. /sandcastle-run                      ← runs the smoke prompt in .sandcastle/prompt.md
+6. /sandcastle-run                      ← runs the smoke prompt in .sandcastle/prompt.md
                                            should print <promise>COMPLETE</promise>
 
 For real AFK execution (after smoke passes):

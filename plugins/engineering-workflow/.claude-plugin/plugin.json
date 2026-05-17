@@ -1,7 +1,7 @@
 {
   "name": "engineering-workflow",
-  "version": "2.2.0",
-  "description": "Unified engineering workflow: alignment → PRD → vertical-slice issues → AFK handoff → TDD execution → architectural sanity → triage. Run /init-workflow once per repo to seed the pipeline order in CLAUDE.md. Skills: grill-with-docs, context-bootstrap, to-prd, to-issues, agent-brief, triage, tdd-vertical, diagnose, zoom-out, deep-modules.",
+  "version": "2.3.0",
+  "description": "Unified engineering workflow: alignment → PRD → vertical-slice issues → AFK handoff → TDD execution → architectural sanity → triage. Run /init-workflow once per repo to seed the pipeline order in CLAUDE.md. Skills: grill-with-docs, context-bootstrap, to-prd, to-issues, agent-brief, triage, tdd-vertical, diagnose, zoom-out, deep-modules. v2.3.0: /to-issues now generates the agent brief inline for every AFK slice (closes the gap where /triage was being skipped, leaving issues in ready-for-agent without a brief). /agent-brief gains a Reality-anchored principle + Real resources template section that validates concrete refs (table.column, endpoint, topic, key) against .sandcastle/probes/*.schema if cached.",
   "author": {
     "name": "Leopoldo Bini",
     "email": "raul.leopoldobini@gmail.com"

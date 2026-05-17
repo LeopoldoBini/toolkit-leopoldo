@@ -39,6 +39,20 @@ The agent needs to know when it's done. Every agent brief must have concrete, te
 
 State what is out of scope. This prevents the agent from gold-plating or making assumptions about adjacent features.
 
+### Reality-anchored (when `.sandcastle/probes/*.schema` exists)
+
+If the repo has `.sandcastle/resources.json` AND `.sandcastle/probes/*.schema` files cached (via `/sandcastle-probe-resources` or a previous `/sandcastle-dispatch-wave` run), the brief MUST anchor any reference to tables, columns, endpoints, queues, or storage keys to **real, verified** names.
+
+Process:
+
+1. Identify every concrete resource reference the brief would make (e.g. "the `users.email` column", "the `POST /orders/{id}/cancel` endpoint", "the `events.user_signup` Kafka topic", "the `s3://bucket/exports/<date>.csv` key").
+2. For each reference, open the matching `.sandcastle/probes/<resource>.schema` file and verify the reference exists. The schema files are plain-text dumps (column lists, OpenAPI docs, topic lists) — grep for the exact name.
+3. If a reference matches: include it in the `**Real resources:**` section verbatim.
+4. If a reference does NOT match: pick the closest real name from the schema cache, but flag it with `(unverified — closest match: X; please confirm)`. Do NOT silently rename — the human decides whether the brief or the schema is wrong.
+5. If `.sandcastle/probes/` does not exist: emit the section as `**Real resources:** (unverified — run /sandcastle-probe-resources to enable verification)` and continue. The dispatcher's Level 3 probe in the container will catch any mismatches at run-time as a fallback.
+
+This section is what closes the loop between PRD intent and runtime reality. Without it, AFK agents fall back to mocks or to guessing column names.
+
 ### Single brief per issue (edit, do not duplicate)
 
 An issue must have **exactly one** `## Agent Brief` comment at any time. The brief is the contract — multiple briefs create ambiguity about which one is "live" and break tooling that consumes them programmatically.
@@ -71,6 +85,10 @@ Be specific about edge cases and error conditions.
 - `TypeName` — what needs to change and why
 - `functionName()` return type — what it currently returns vs what it should return
 - Config shape — any new configuration options needed
+
+**Real resources:**
+- `<resource-name>` / `<table.column or endpoint or topic or key>` (`<type/shape verified from .sandcastle/probes/>`)
+- (Omit this section if no resources are touched. Mark unverifiable refs with `(unverified — closest match: X)`.)
 
 **Acceptance criteria:**
 - [ ] Specific, testable criterion 1
@@ -107,6 +125,9 @@ and append "..." to indicate truncation.
   word boundaries
 - Any function that reads SKILL.md frontmatter and extracts the description
 
+**Real resources:**
+- (none — this is a pure-code change, no DB/HTTP/queue resources touched)
+
 **Acceptance criteria:**
 - [ ] Descriptions under 1024 chars are unchanged
 - [ ] Descriptions over 1024 chars are truncated at the last word boundary
@@ -117,6 +138,44 @@ and append "..." to indicate truncation.
 **Out of scope:**
 - Changing the 1024 char limit itself
 - Multi-line description support
+```
+
+### Good agent brief (touches real resources)
+
+```markdown
+## Agent Brief
+
+**Category:** enhancement
+**Summary:** Persist user email changes through the auth-api to the main DB
+
+**Current behavior:**
+The `User.updateEmail()` method exists in code but does not persist —
+calls are no-ops because the auth-api endpoint is unwired.
+
+**Desired behavior:**
+Calling `User.updateEmail(newEmail)` should:
+1. Validate the new email against RFC 5322
+2. Call the auth-api to update the canonical record
+3. Reflect the change in the main DB (eventually consistent via auth-api webhook)
+
+**Key interfaces:**
+- `User.updateEmail(email: string) → Promise<void>` — returns when auth-api confirms
+- Validation: reuse the `EmailValidator` already in the codebase (do not reimplement)
+
+**Real resources:**
+- `auth-api` / `POST /v1/users/{id}/email` (request: `{email: string}`, returns 204 on success, 422 on invalid)
+- `main-db` / `users.email` (verified varchar(255), not null, unique index)
+- `main-db` / `users.email_updated_at` (verified timestamptz, nullable)
+
+**Acceptance criteria:**
+- [ ] `User.updateEmail("foo@bar.com")` hits the real auth-api endpoint
+- [ ] Test exercises the real `main-db.users.email` column (no mock)
+- [ ] After webhook consumption, `users.email` reflects the new value AND `users.email_updated_at` is set to NOW()
+- [ ] Invalid emails (per RFC 5322) reject with the auth-api's 422 error mapped to a domain error
+
+**Out of scope:**
+- Email verification flow (separate ticket)
+- Changing the auth-api's request/response shape
 ```
 
 ### Good agent brief (enhancement)

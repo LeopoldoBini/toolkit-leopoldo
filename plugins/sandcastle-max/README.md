@@ -217,7 +217,7 @@ Not the same as `/tdd-vertical` (which is interactive, has refactor phase, requi
 - **Sandcastle hardcodes** `--user $HOST_UID:$HOST_GID` and `HOME=/home/agent`. The Dockerfile is shaped around those constraints. If Sandcastle changes that, the Dockerfile may need adjustment — see the `sandcastle-afk` skill's grep map.
 - **Concurrency capped by dep graph.** The dispatcher launches all eligible at once. If your dep graph naturally serializes (e.g. all issues block on a single foundation), the wave will be size 1.
 
-## Files in this plugin (v0.7.0)
+## Files in this plugin (v0.8.0)
 
 ```
 sandcastle-max/
@@ -225,6 +225,7 @@ sandcastle-max/
 ├── README.md                                     ← this file
 ├── commands/
 │   ├── sandcastle-init.md                        ← /sandcastle-init (stack-aware + resources.json v0.7.0)
+│   ├── sandcastle-probe-resources.md             ← /sandcastle-probe-resources (NEW v0.8.0)
 │   ├── sandcastle-build.md                       ← /sandcastle-build
 │   ├── sandcastle-run.md                         ← /sandcastle-run
 │   ├── sandcastle-dispatch-wave.md               ← /sandcastle-dispatch-wave (3-level probes + RGR v0.7.0)
@@ -258,9 +259,16 @@ sandcastle-max/
 
 ## Related plugins in this marketplace
 
-- **engineering-workflow** *(>=2.1.0)* — the pipeline that produces the agent briefs you feed to Sandcastle. `/triage` and `/agent-brief` enforce the **single-brief invariant** (edit, do not duplicate) which `/sandcastle-dispatch-wave` consumes. Without v2.1.0, multiple briefs may exist per issue and the dispatcher's "latest wins" rule can be inconsistent — strongly prefer >=2.1.0.
+- **engineering-workflow** *(>=2.3.0 recommended)* — the pipeline that produces the agent briefs you feed to Sandcastle. `/triage` and `/agent-brief` enforce the **single-brief invariant** (edit, do not duplicate) which `/sandcastle-dispatch-wave` consumes. `>=2.3.0` adds inline brief generation in `/to-issues` (closes the gap where issues landed in `ready-for-agent` with no brief) and reads `.sandcastle/probes/*.schema` from this plugin to anchor briefs to real refs (table.column, endpoint, topic, key). `>=2.1.0` only — multiple briefs may exist per issue and you'll need to invoke `/agent-brief` or `/triage` manually before `/sandcastle-dispatch-wave`.
 
 ## Version history
+
+- **0.8.0** *(2026-05-17)* — **Schema cache bootstrap + brief-side reality anchoring**.
+  - Disparador: aunque v0.7.0 atrapaba schema mismatches en el container (Level 3, Step 0.b del prompt), eso gastaba un slot del container (~30s + setup). Más importante: el agujero real era que los briefs llegaban al dispatcher SIN refs concretas a recursos — `/to-issues` salta `/triage`, y `/triage` era el único punto donde `/agent-brief` se invocaba.
+  - **`/sandcastle-probe-resources`** (NUEVO command): corre Level 1 host-side probes + cachea `schema_introspect` output a `.sandcastle/probes/<name>.schema`. NO lanza containers. Bootstrap del cache que `engineering-workflow >=2.3.0` lee desde `/to-issues` y `/agent-brief` para anchor briefs a refs reales.
+  - **`/sandcastle-init`**: final checklist actualizado para sugerir correr `/sandcastle-probe-resources` después de editar `resources.json` y antes de `/sandcastle-build`.
+  - Cross-plugin dependency: `engineering-workflow >=2.3.0` consume `.sandcastle/probes/*.schema`. Soft coupling con degradación elegante — si los caches no existen, los briefs salen marcados `(unverified — run /sandcastle-probe-resources)` y el Level 3 del container actúa de seatbelt.
+  - Sin cambios al dispatcher (Level 1/2/3 siguen igual que v0.7.0). El "Level 0" que mencionábamos como futuro queda intencionalmente NO implementado — el Level 3 del container alcanza con costo bajo, y todo el valor extra se captura ahora en el momento de generación del brief.
 
 - **0.7.0** *(2026-05-15)* — **Anti-mock + reality-first testing**.
   - Disparador: AFK agents estaban produciendo tests que pasaban contra mocks mientras la DB real tenía schema divergente. PRs verdes en CI, prod rota.

@@ -29,12 +29,12 @@ Orden default cuando se arranca o retoma trabajo en este repo. Cada paso se invo
 1. **`/context-bootstrap`** — solo si el repo ya tiene código pero no hay `CONTEXT.md`. One-shot por repo.
 2. **`/grill-with-docs`** (o `/grill-me` para no-código) — alineación: el agente te interroga hasta que el plan esté claro. Actualiza `CONTEXT.md` y propone ADRs cuando hay decisiones grandes.
 3. **`/to-prd`** — sintetiza un PRD durable a partir de la conversación. Misma sesión que el grilling.
-4. **`/to-issues`** — rompe el PRD en **vertical slices** (tracer bullets). Anti-horizontal.
+4. **`/to-issues`** — rompe el PRD en **vertical slices** (tracer bullets). Anti-horizontal. **Para cada slice AFK, además publica el `## Agent Brief` comment inline** (engineering-workflow >=2.3.0) — no hace falta invocar `/agent-brief` ni `/triage` manualmente para el happy path. Si el repo tiene `.sandcastle/probes/*.schema` cacheados (vía `/sandcastle-probe-resources` del plugin sandcastle-max), las refs concretas a recursos en el brief se verifican contra schemas reales antes de publicar.
 5. **Implementación — bifurcación según modo**. Los issues se ejecutan en uno de dos modos; elegir antes de empezar:
    - **Sesión interactiva** (vos al teclado con Claude): directo a **`/tdd-vertical`** + **`/diagnose`**. Red-green-refactor un slice a la vez; `/diagnose` cuando algo se rompe. Sin agent-brief — el contexto vive en la conversación.
-   - **AFK / handoff a agente remoto**: **`/agent-brief <issue>`** (contrato durable — acceptance criteria, out-of-scope, sin paths frágiles) + **`/schedule`** (cuándo se dispara). El agente AFK ejecuta `/tdd-vertical` adentro, contra el brief, sin vos al lado.
+   - **AFK / handoff a agente remoto**: el brief ya fue publicado por `/to-issues` (paso 4); solo lanzar **`/sandcastle-dispatch-wave`** (plugin sandcastle-max) o **`/schedule`** según sustrato. El agente AFK ejecuta el contrato del brief contra recursos reales (anti-mock + RGR + 3 niveles de probe).
 6. **`/zoom-out`** + **`/deep-modules`** — cada 3-5 issues cerrados, sanidad arquitectónica (mapeo de alto nivel + deepening opportunities).
-7. **`/triage`** — cuando el backlog crece, máquina de estados sobre los issues.
+7. **`/triage`** — cuando el backlog crece, máquina de estados sobre los issues. También invocable manualmente cuando un issue llega por fuera de `/to-issues` (reporte de usuario, etc) y necesita un brief — `/triage` invoca `/agent-brief` internamente al mover a `ready-for-agent`.
 
 ### Reglas
 - Saltarse el paso 2 (alineación) es la causa #1 de retrabajo. No saltearlo.

@@ -9,8 +9,8 @@
   "plugins": [
     {
       "name": "engineering-workflow",
-      "description": "Unified engineering workflow (10 skills + /init-workflow command). The full pipeline: /grill-with-docs and /context-bootstrap (alignment + shared language), /to-prd, /to-issues, /agent-brief, /triage (backlog flow), /tdd-vertical, /diagnose, /zoom-out, /deep-modules (disciplined coding). Run /init-workflow once per repo to seed the pipeline order in CLAUDE.md. v2.1.0: single-brief invariant — /triage and /agent-brief now edit the existing brief comment instead of creating duplicates.",
-      "version": "2.1.0",
+      "description": "Unified engineering workflow (10 skills + /init-workflow command). The full pipeline: /grill-with-docs and /context-bootstrap (alignment + shared language), /to-prd, /to-issues, /agent-brief, /triage (backlog flow), /tdd-vertical, /diagnose, /zoom-out, /deep-modules (disciplined coding). Run /init-workflow once per repo to seed the pipeline order in CLAUDE.md. v2.3.0: /to-issues now generates the agent brief inline for every AFK slice (closes the gap where /triage was being skipped, leaving issues in ready-for-agent without a brief). /agent-brief gains a Reality-anchored principle + Real resources template section that validates concrete refs (table.column, endpoint, topic, key) against .sandcastle/probes/*.schema if cached.",
+      "version": "2.3.0",
       "author": { "name": "Leopoldo Bini" },
       "source": "./plugins/engineering-workflow",
       "category": "engineering"
@@ -57,8 +57,8 @@
     },
     {
       "name": "sandcastle-max",
-      "description": "AFK Claude Code agents en Docker contra tu Claude Max subscription (vía CLAUDE_CODE_OAUTH_TOKEN, workaround para Sandcastle issue #191 wontfix). v0.5.0: Opus 4.7 default everywhere (implementer + reviewer + resolver + fixer), soporte de feature branches + worktrees (naming agent/<base-slug>/issue-N), self-check vs brief pre-PR, ciclo completo sin GH Actions. /sandcastle-init scaffolds .sandcastle/ (Dockerfile + main.mts env-driven). /sandcastle-dispatch-wave lanza N containers Opus paralelos sobre issues `ready-for-agent` con deps cerradas; PR contra base branch detectada (soporta feature branches y worktrees). /sandcastle-merge-wave (v0.5.0): review paralelo Opus single-axis Spec + coordinator topológico + merge serial con auto-rebase y conflict-resolver intent-aware (outputs RESOLVED/INCOMPATIBLE con criterios de no-regresión explícitos). /sandcastle-pipeline (v0.5.0): integrador que loopa dispatch → validate → merge con checkpoints JSON, polling local cada 30s, detección de quota Max exhausted. scripts/sandcastle-validate.sh: local CI gate en Docker liviano que reemplaza afk-checks.yml. /afk-pr-triage queda como fallback legacy. Skill sandcastle-afk: gotchas + grep map de Sandcastle internals.",
-      "version": "0.5.0",
+      "description": "AFK Claude Code agents en Docker contra tu Claude Max subscription (vía CLAUDE_CODE_OAUTH_TOKEN, workaround para Sandcastle issue #191 wontfix). v0.8.0: bootstrap del schema cache standalone vía /sandcastle-probe-resources (host-only, no containers) — cachea schemas a .sandcastle/probes/<name>.schema que engineering-workflow >=2.3.0 lee desde /to-issues y /agent-brief para anchor briefs a refs reales (verifica table.column, endpoint, topic, key). /sandcastle-init final checklist pide correrlo después del scaffold. v0.7.0 sigue vigente: .sandcastle/resources.json declara recursos externos (DB/HTTP/queue/etc) con policy mandatory|optional; 3 niveles de defensa (Level 1 host pre-flight, Level 2 container connectivity, Level 3 container schema diff); runtime/main.mts propaga env_required al agentEnv; prompt enforza red-green-reality-first. v0.6.0 stack-aware scaffold: Dockerfile compuesto per-project desde snippets (Node/Bun/.NET/Python/Go/Ruby/Rust/polyglot) + agent layer con UID surgery. Slash commands: /sandcastle-init, /sandcastle-probe-resources (NUEVO v0.8.0), /sandcastle-build, /sandcastle-run, /sandcastle-dispatch-wave, /sandcastle-merge-wave, /sandcastle-pipeline. Per-project image: sandcastle-<repo-basename>.",
+      "version": "0.8.0",
       "author": { "name": "Leopoldo Bini" },
       "source": "./plugins/sandcastle-max",
       "category": "engineering"

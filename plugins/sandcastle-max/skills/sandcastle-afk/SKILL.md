@@ -78,6 +78,103 @@ SANDCASTLE_PROMPT_FILE=./.sandcastle/prompts/issue-2.md
 
 **Why env vars and not file-rewrite:** the dispatcher running multiple containers in parallel can't safely mutate a shared `main.mts` per launch. Env vars per subshell isolate the dispatch parameters cleanly. See the `/sandcastle-dispatch-wave` command for the full env-var schema.
 
+## Docker capabilities (Netbird, NET_ADMIN, post-create hook)
+
+By default, Sandcastle containers run with the standard Docker capability set — no `NET_ADMIN`, no `/dev/net/tun`, no post-create hook. For most projects that's fine. But some setups need more:
+
+- **VPN-only resources.** The AFK agent needs to reach a database, queue, or API that's only routable from inside a private network (e.g. a stand-by SQL Server on a Netbird/Tailscale/WireGuard mesh). Without VPN access, queries are written blind against an imagined schema and the agent commits broken code.
+- **Linux capabilities** beyond defaults (rare but real — e.g. `SYS_PTRACE` for in-container debugging tools).
+- **Init scripts** that need to run as root before the agent starts (typical: bring up a VPN peer, mount a private CA, register with a service mesh).
+
+The plugin ships with a bundled patch to `@ai-hero/sandcastle@0.5.10` (lives in `${CLAUDE_PLUGIN_ROOT}/runtime/patches/`, applied via `bun.patchedDependencies` on first install). The patch exposes three declarative knobs in `.sandcastle/config.json`:
+
+```json
+{
+  "imageName": "sandcastle-<repo>",
+  "runtimes": ["dotnet"],
+  "promptFile": ".sandcastle/prompt.md",
+  "dockerfile": ".sandcastle/Dockerfile",
+  "model": "claude-opus-4-7",
+  "docker": {
+    "capAdd": ["NET_ADMIN"],
+    "devices": ["/dev/net/tun"],
+    "postCreateHook": "/usr/local/bin/netbird-up.sh"
+  }
+}
+```
+
+Mapping:
+
+| `config.docker` field | Becomes `docker run` flag | Plugin env var (internal) |
+|------------------------|---------------------------|---------------------------|
+| `capAdd: ["NET_ADMIN", …]` | `--cap-add NET_ADMIN …` | `SANDCASTLE_EXTRA_CAPS=NET_ADMIN,…` |
+| `devices: ["/dev/net/tun", …]` | `--device /dev/net/tun …` | `SANDCASTLE_EXTRA_DEVICES=/dev/net/tun,…` |
+| `postCreateHook: "/path"` | `docker exec --user root … sh -c "$path"` after create | `SANDCASTLE_POST_CREATE_HOOK=/path` |
+
+The plugin's `main.mts` translates the `docker` block to the `SANDCASTLE_*` env vars before calling `sandcastle.run(...)`. You don't need to set these env vars manually — the config block is the API.
+
+### Putting it together: Netbird-in-container
+
+If your AFK agents need to reach a VPN-only resource:
+
+1. **Install Netbird in your image.** Drop a snippet at `.sandcastle/snippets/extras.dockerfile`:
+   ```dockerfile
+   # extras.dockerfile — auto-included by /sandcastle-init
+   USER root
+   RUN curl -fsSL https://pkgs.netbird.io/install.sh | sh
+   COPY netbird-up.sh /usr/local/bin/netbird-up.sh
+   RUN chmod +x /usr/local/bin/netbird-up.sh
+   ```
+   The `netbird-up.sh` script lives in `.sandcastle/netbird-up.sh` next to the Dockerfile and gets `COPY`-ed in. Its job: read `$NB_SETUP_KEY` from env, run `netbird up`, wait for `Management: Connected`.
+2. **Declare the setup key as a resource env.** In `.sandcastle/resources.json`:
+   ```json
+   {
+     "resources": [
+       {
+         "name": "netbird-peer",
+         "type": "vpn",
+         "env_required": ["NB_SETUP_KEY"],
+         "connectivity_probe": "netbird status 2>/dev/null | grep -q 'Management: Connected'",
+         "policy": "mandatory"
+       }
+     ]
+   }
+   ```
+   `main.mts` propagates `NB_SETUP_KEY` from host env to the container's `agentEnv`.
+3. **Wire the capabilities** in `.sandcastle/config.json`:
+   ```json
+   {
+     "docker": {
+       "capAdd": ["NET_ADMIN"],
+       "devices": ["/dev/net/tun"],
+       "postCreateHook": "/usr/local/bin/netbird-up.sh"
+     }
+   }
+   ```
+4. **Build + run.** `/sandcastle-build` bakes Netbird into the image; `/sandcastle-run` launches the container with the right `--cap-add` / `--device` flags, executes `netbird-up.sh` as root post-create, then hands off to the agent. The agent's `claude --print` loop now has VPN routes loaded — Dapper queries against the stand-by DB resolve to real columns.
+
+### When NOT to use this
+
+- **Pure local CRUD / no private resources.** Standard container is fine. Don't add `NET_ADMIN` for fun — it widens the kernel surface the agent can interact with.
+- **Resources that have a public ingress.** If your DB has a tunneled public endpoint with auth, prefer that to a VPN peer per container — simpler, no kernel caps needed.
+- **CI/CD runners that already have VPN at the host level.** Use `--network host` (custom Dockerfile) or route from the host instead of enrolling each container as its own peer.
+
+### Where to grep if the patch breaks
+
+The patch lives at `${CLAUDE_PLUGIN_ROOT}/runtime/patches/@ai-hero%2Fsandcastle@0.5.10.patch`. It modifies two files in `node_modules/@ai-hero/sandcastle/dist/`:
+
+- `DockerLifecycle.js` — adds `SANDCASTLE_EXTRA_CAPS` and `SANDCASTLE_EXTRA_DEVICES` parsing in `startContainer`.
+- `sandboxes/docker.js` — adds the `SANDCASTLE_POST_CREATE_HOOK` block right after container create.
+
+Verify the patch applied:
+```bash
+grep -c "SANDCASTLE_EXTRA_CAPS" \
+  ${CLAUDE_PLUGIN_ROOT}/runtime/node_modules/@ai-hero/sandcastle/dist/DockerLifecycle.js
+# expect: >= 1
+```
+
+If upstream `@ai-hero/sandcastle` ships native support for `cap_add`/`devices`/post-create hooks in a future release, drop the patch and migrate to the upstream API — the plugin will follow.
+
 ## How this plugin chains with engineering-workflow
 
 This plugin is the **execution layer**. The **brief authoring layer** is the `engineering-workflow` plugin (>=2.1.0), which lives in the same `toolkit-leopoldo` marketplace. The chain:

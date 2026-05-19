@@ -1,6 +1,6 @@
 {
   "name": "sandcastle-max-runtime",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "Plugin-hosted orchestrator for sandcastle-max. Invoked by /sandcastle-build, /sandcastle-run, and the dispatch/merge wave commands. Reads .sandcastle/config.json from the user's repo (cwd) to pick imageName + prompt + model.",
   "type": "module",
@@ -8,7 +8,10 @@
     "start": "tsx main.mts"
   },
   "dependencies": {
-    "@ai-hero/sandcastle": "latest",
+    "@ai-hero/sandcastle": "0.5.10",
     "tsx": "latest"
+  },
+  "patchedDependencies": {
+    "@ai-hero/sandcastle@0.5.10": "patches/@ai-hero%2Fsandcastle@0.5.10.patch"
   }
 }

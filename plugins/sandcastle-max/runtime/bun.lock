@@ -4,10 +4,13 @@
     "": {
       "name": "sandcastle-max-runtime",
       "dependencies": {
-        "@ai-hero/sandcastle": "latest",
+        "@ai-hero/sandcastle": "0.5.10",
         "tsx": "latest",
       },
     },
+  },
+  "patchedDependencies": {
+    "@ai-hero/sandcastle@0.5.10": "patches/@ai-hero%2Fsandcastle@0.5.10.patch",
   },
   "packages": {
     "@ai-hero/sandcastle": ["@ai-hero/sandcastle@0.5.10", "", { "dependencies": { "@clack/prompts": "^1.1.0", "@effect/cli": "^0.74.0", "@effect/platform": "^0.95.0", "@effect/platform-node": "^0.105.0", "@effect/printer": "^0.48.0", "@effect/printer-ansi": "^0.48.0", "effect": "^3.20.0" }, "peerDependencies": { "@daytona/sdk": "^0.164.0", "@vercel/sandbox": ">=1.0.0" }, "optionalPeers": ["@daytona/sdk", "@vercel/sandbox"], "bin": { "sandcastle": "dist/main.js" } }, "sha512-6nEUfWA0W5fRxEgyPrqUqqJyBsniNSM2ABKo8+5fKZ9yeBStqz7CWn0jG7HzNYa4AB5yVHKFZg5yW5kZUSbSog=="],
@@ -180,7 +183,7 @@
 
     "toml": ["toml@3.0.0", "", {}, "sha512-y/mWCZinnvxjTKYhJ+pYxwD0mRLVvOtdS2Awbgxln6iEnt4rk0yBxeSBHkGJcPucRiG0e55mwWp+g/05rsrd6w=="],
 
-    "tsx": ["tsx@4.22.0", "", { "dependencies": { "esbuild": "~0.28.0" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "bin": { "tsx": "dist/cli.mjs" } }, "sha512-8ccZMPD69s1AbKXx0C5ddTNZfNjwV04iIKgjZmKfKxMynEtSYcK0Lh7iQFh53fI5Yu4pb9usgAiqyPmEONaALg=="],
+    "tsx": ["tsx@4.22.2", "", { "dependencies": { "esbuild": "~0.28.0" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "bin": { "tsx": "dist/cli.mjs" } }, "sha512-6w9FwtT8WQqRAyTNR+Z+86kghRqpmOLjXUrBlBT6T+CQGDuIMm0VmAqaFUFBIeKDTGobE6/YSigZYLeomzBaRg=="],
 
     "undici": ["undici@7.25.0", "", {}, "sha512-xXnp4kTyor2Zq+J1FfPI6Eq3ew5h6Vl0F/8d9XU5zZQf1tX9s2Su1/3PiMmUANFULpmksxkClamIZcaUqryHsQ=="],
 

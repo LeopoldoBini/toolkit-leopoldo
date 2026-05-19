@@ -1,0 +1,64 @@
+diff --git a/dist/DockerLifecycle.js b/dist/DockerLifecycle.js
+index ee04bc12c36ab4ab3090ebd83919d9b1e5b7ab55..e5951f453f26d06231e764cd962178d6d3722d97 100644
+--- a/dist/DockerLifecycle.js
++++ b/dist/DockerLifecycle.js
+@@ -80,6 +80,18 @@ export const startContainer = (containerName, imageName, env, options) => Effect
+             : [options.network]
+         : [];
+     const networkFlags = networks.flatMap((n) => ["--network", n]);
++    // PATCH (saltacompra-ethix): permite inyectar capabilities y devices via
++    // env vars del proceso host. Necesario porque @ai-hero/sandcastle no expone
++    // estos flags en DockerOptions, y el container AFK necesita NET_ADMIN +
++    // /dev/net/tun para enrolar como peer Netbird y alcanzar el stand-by SQL.
++    // Formato: CSV. Ej: SANDCASTLE_EXTRA_CAPS=NET_ADMIN,SYS_PTRACE
++    //               SANDCASTLE_EXTRA_DEVICES=/dev/net/tun
++    const extraCaps = (process.env.SANDCASTLE_EXTRA_CAPS ?? "")
++        .split(",").map(s => s.trim()).filter(Boolean);
++    const extraDevices = (process.env.SANDCASTLE_EXTRA_DEVICES ?? "")
++        .split(",").map(s => s.trim()).filter(Boolean);
++    const capFlags = extraCaps.flatMap((c) => ["--cap-add", c]);
++    const deviceFlags = extraDevices.flatMap((d) => ["--device", d]);
+     yield* dockerExec([
+         "run",
+         "-d",
+@@ -90,6 +102,8 @@ export const startContainer = (containerName, imageName, env, options) => Effect
+         ...workdirFlags,
+         ...userFlags,
+         ...networkFlags,
++        ...capFlags,
++        ...deviceFlags,
+         imageName,
+     ]);
+ });
+diff --git a/dist/sandboxes/docker.js b/dist/sandboxes/docker.js
+index 2cc7cea8e1c167bf6f3ea8a3d8116c768b5cbcb3..a09917001e1399e3c72a797c80165e45410c1b7a 100644
+--- a/dist/sandboxes/docker.js
++++ b/dist/sandboxes/docker.js
+@@ -59,6 +59,27 @@ export const docker = (options) => {
+                 network: options?.network,
+                 selinuxLabel,
+             }));
++            // PATCH (saltacompra-ethix): post-create hook. Si la env var
++            // SANDCASTLE_POST_CREATE_HOOK está seteada, se ejecuta el path
++            // adentro del container como root, antes de que el agente arranque.
++            // Caso de uso: levantar Netbird vía /usr/local/bin/netbird-up.sh
++            // para que el agente tenga conectividad al stand-by SQL durante
++            // su loop de desarrollo (y no escriba queries blind contra un
++            // schema imaginado, como pasó con los 9 mismatches de Bundle 1).
++            const postCreateHook = process.env.SANDCASTLE_POST_CREATE_HOOK;
++            if (postCreateHook) {
++                await new Promise((resolve, reject) => {
++                    const proc = spawn("docker", [
++                        "exec", "--user", "0:0", containerName,
++                        "sh", "-c", postCreateHook,
++                    ], { stdio: ["ignore", "inherit", "inherit"] });
++                    proc.on("error", (err) => reject(new Error(`post-create hook spawn failed: ${err.message}`)));
++                    proc.on("close", (code) => {
++                        if (code === 0) resolve();
++                        else reject(new Error(`post-create hook exited with code ${code}`));
++                    });
++                });
++            }
+             // Create parent directories for file mounts and chown to the container user
+             for (const dir of parentDirsToCreate) {
+                 await new Promise((resolve, reject) => {

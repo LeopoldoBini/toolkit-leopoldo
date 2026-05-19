@@ -14,6 +14,20 @@ if (!existsSync(configPath)) {
   process.exit(1);
 }
 
+type DockerCustomization = {
+  // Linux capabilities to add to the container, e.g. ["NET_ADMIN"] for Netbird.
+  // Translated to --cap-add flags via SANDCASTLE_EXTRA_CAPS (bundled patch).
+  capAdd?: string[];
+  // Host devices to expose, e.g. ["/dev/net/tun"] for Netbird tun device.
+  // Translated to --device flags via SANDCASTLE_EXTRA_DEVICES (bundled patch).
+  devices?: string[];
+  // Path inside the container to execute as root after create, before the
+  // agent starts. Typical use: bring up a VPN peer so the agent has
+  // network access to private resources during its dev loop. Translated to
+  // SANDCASTLE_POST_CREATE_HOOK (bundled patch).
+  postCreateHook?: string;
+};
+
 type SandcastleConfig = {
   imageName: string;
   runtimes?: string[];
@@ -21,6 +35,7 @@ type SandcastleConfig = {
   promptFile?: string;
   dockerfile?: string;
   model?: string;
+  docker?: DockerCustomization;
 };
 
 const config: SandcastleConfig = JSON.parse(readFileSync(configPath, "utf-8"));
@@ -120,6 +135,39 @@ if (issueNumber) {
 console.log(`[sandcastle-max] model=${model} (default Opus 4.7)`);
 if (config.runtimes?.length) {
   console.log(`[sandcastle-max] runtimes=${config.runtimes.join(", ")}`);
+}
+
+// Translate config.docker to SANDCASTLE_EXTRA_* env vars that the bundled
+// @ai-hero/sandcastle patch reads when assembling the `docker run` command.
+// Set on process.env (the Node orchestrator), NOT agentEnv (container).
+const dockerCfg = config.docker;
+if (dockerCfg) {
+  if (Array.isArray(dockerCfg.capAdd) && dockerCfg.capAdd.length > 0) {
+    process.env.SANDCASTLE_EXTRA_CAPS = dockerCfg.capAdd.join(",");
+  }
+  if (Array.isArray(dockerCfg.devices) && dockerCfg.devices.length > 0) {
+    process.env.SANDCASTLE_EXTRA_DEVICES = dockerCfg.devices.join(",");
+  }
+  if (
+    typeof dockerCfg.postCreateHook === "string" &&
+    dockerCfg.postCreateHook.length > 0
+  ) {
+    process.env.SANDCASTLE_POST_CREATE_HOOK = dockerCfg.postCreateHook;
+  }
+  const summary = [
+    dockerCfg.capAdd?.length ? `caps=${dockerCfg.capAdd.join(",")}` : null,
+    dockerCfg.devices?.length
+      ? `devices=${dockerCfg.devices.join(",")}`
+      : null,
+    dockerCfg.postCreateHook
+      ? `post-create=${dockerCfg.postCreateHook}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  if (summary) {
+    console.log(`[sandcastle-max] docker customization: ${summary}`);
+  }
 }
 
 await run({

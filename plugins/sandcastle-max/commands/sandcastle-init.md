@@ -216,6 +216,10 @@ Customization:
 - Edit .sandcastle/resources.json to declare external resources AFK agents must verify
   (databases, APIs, queues). mandatory resources cannot be mocked and abort dispatch on
   probe failure. See .sandcastle/resources.json.example for the full schema.
+- If you need extra Docker capabilities (NET_ADMIN), devices (/dev/net/tun), or a
+  post-create hook (Netbird bring-up, custom CA mount), add a `docker` block to
+  .sandcastle/config.json with capAdd/devices/postCreateHook arrays/strings. Details
+  in the skill `sandcastle-afk`.
 - Drop a snippet at .sandcastle/snippets/extras.dockerfile for ad-hoc additions
   (auto-included on next /sandcastle-init).
 - Override a built-in snippet by creating .sandcastle/snippets/<name>.dockerfile.

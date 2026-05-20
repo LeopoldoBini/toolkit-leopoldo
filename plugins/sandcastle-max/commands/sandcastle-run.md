@@ -30,8 +30,19 @@ cd "${CLAUDE_PLUGIN_ROOT}/runtime" && (bun install || npm install)
 **CLAUDE_CODE_OAUTH_TOKEN** — try in order, first match wins:
 
 ```bash
-# (a) macOS Keychain
-TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+# (a) macOS Keychain. Claude Code stores the OAuth credentials as a JSON
+# wrapper: {"claudeAiOauth":{"accessToken":"sk-ant-oat01-...", ...}}. The
+# container expects the raw access token, so we extract it with jq.
+TOKEN=""
+KEYCHAIN_RAW=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+if [[ -n "$KEYCHAIN_RAW" ]]; then
+  if [[ "${KEYCHAIN_RAW:0:1}" == "{" ]]; then
+    TOKEN=$(printf '%s' "$KEYCHAIN_RAW" | jq -r '.claudeAiOauth.accessToken // empty' 2>/dev/null || true)
+  else
+    # Legacy: raw sk-ant-oat01-* token stored directly.
+    TOKEN="$KEYCHAIN_RAW"
+  fi
+fi
 
 # (b) .sandcastle/.env fallback
 if [[ -z "$TOKEN" && -f "$REPO/.sandcastle/.env" ]]; then

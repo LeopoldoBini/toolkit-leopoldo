@@ -40,8 +40,17 @@ if [[ ! -d "${CLAUDE_PLUGIN_ROOT}/runtime/node_modules" ]]; then
 fi
 
 # Auto-recover OAuth token: Keychain → .sandcastle/.env fallback.
+# Claude Code stores credentials as {"claudeAiOauth":{"accessToken":"sk-ant-oat01-...", ...}};
+# the container expects the raw access token, so we extract it with jq.
 if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-  CLAUDE_CODE_OAUTH_TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+  KEYCHAIN_RAW=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+  if [[ -n "$KEYCHAIN_RAW" ]]; then
+    if [[ "${KEYCHAIN_RAW:0:1}" == "{" ]]; then
+      CLAUDE_CODE_OAUTH_TOKEN=$(printf '%s' "$KEYCHAIN_RAW" | jq -r '.claudeAiOauth.accessToken // empty' 2>/dev/null || true)
+    else
+      CLAUDE_CODE_OAUTH_TOKEN="$KEYCHAIN_RAW"
+    fi
+  fi
   if [[ -z "$CLAUDE_CODE_OAUTH_TOKEN" && -f .sandcastle/.env ]]; then
     CLAUDE_CODE_OAUTH_TOKEN=$(grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' .sandcastle/.env | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
   fi

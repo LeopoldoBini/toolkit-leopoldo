@@ -255,8 +255,15 @@ Sandcastle saw the container start, sent the prompt to `claude --print`, and got
 ```bash
 # Manual repro — run claude --print inside the container with the same env.
 # v2: image name is per-project; read from .sandcastle/config.json.
+# Keychain stores Claude Code creds as JSON {"claudeAiOauth":{"accessToken":...}};
+# extract the raw access token with jq (the container expects the raw value).
 IMG=$(jq -r '.imageName' .sandcastle/config.json)
-TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null)
+RAW=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null)
+if [[ "${RAW:0:1}" == "{" ]]; then
+  TOKEN=$(printf '%s' "$RAW" | jq -r '.claudeAiOauth.accessToken')
+else
+  TOKEN="$RAW"
+fi
 docker run --rm --user 501:20 \
   -e HOME=/home/agent \
   -e CLAUDE_CODE_OAUTH_TOKEN="$TOKEN" \

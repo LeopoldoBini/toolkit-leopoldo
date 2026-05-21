@@ -64,11 +64,11 @@
       "category": "productivity"
     },
     {
-      "name": "merge-orchestrator",
-      "description": "Host-side intent-aware merge orchestrator for batches of 2-7 open GitHub PRs. Runs entirely in your Claude Code session (no Docker, no Sandcastle SDK). Skill auto-invocable ('mergeame los PRs', 'orquestá los merges en orden', 'intent-aware merge') + slash command `/merge-orchestrate`. Per PR: gathers intent via cascade (issue brief → PR body → commits → diff), computes topological order from `Blocked by` deps + file-overlap risk pairs, refreshes base, `gh pr update-branch`, ephemeral worktree, cascade validation, dispatches a fresh Opus `merge-resolver` subagent that enforces 5 no-regression criteria and emits `<action>MERGE|HOLD|ABORT</action>` + `<resolution>RESOLVED|INCOMPATIBLE|NOT_NEEDED</resolution>`. Host executes the recommendation (squash --delete-branch by default). Auto-stash dirty working tree, restore at end. Idempotent (GitHub-as-state). Complementary to sandcastle-max (Docker-AFK, parallel reviewers) — same 5 criteria, different substrate.",
-      "version": "0.1.0",
+      "name": "host-orchestrator",
+      "description": "Host-side orchestration of the full AFK pipeline — implementation + merge — using Claude Code's NATIVE subagent + worktree primitives. No Docker, no Sandcastle SDK, no OAuth token extraction. Two slash commands (no auto-invocable skills, explicit invocation only): `/parallel-implement-wave` dispatches 2-6 ready-for-agent GH issues in sync parallel (1 host message, N Agent calls with `isolation: \"worktree\"`); per result host validates (typecheck + tests via cascade auto-detect or `scripts/sandcastle-validate.sh`), renames branch `agent/<base-slug>/issue-N`, pushes, opens PR with label `afk-agent-pr`. `/merge-orchestrate` runs intent-aware serial merge of 2-7 open PRs (cascade intent gathering, topological order from `Blocked by` + file-overlap risk pairs, ephemeral worktrees, cascade validation, dispatches `merge-resolver` Opus subagent per PR enforcing 5 no-regression criteria, host executes squash --delete-branch). Custom subagents: `parallel-implementer` (TDD red-green-reality-first per criterion, vertical-slice discipline, 7 anti-mock anti-patterns, bronze rule self-check) and `merge-resolver` (5 criteria, emits `<action>` + `<resolution>` XML, never pushes). Host owns all remote mutations. Audit log append-only `.host-orchestrator/waves/<ts>.log`. Smart-wave retry (`agent-stuck`/`agent-crashed`/`agent-push-failed`/`agent-blocked-rebrief`). Orphan-worktree handling via `--resume` / `--clean-worktrees`. Complementary to sandcastle-max (Docker AFK, larger batches, same brief format, same PR label). Renamed from `merge-orchestrator` v0.1.0 in v2.0.0 (breaking: skill removed, plugin name changed; slash commands `/merge-orchestrate` and `/parallel-implement-wave` unchanged in interface).",
+      "version": "2.0.0",
       "author": { "name": "Leopoldo Bini" },
-      "source": "./plugins/merge-orchestrator",
+      "source": "./plugins/host-orchestrator",
       "category": "engineering"
     },
     {

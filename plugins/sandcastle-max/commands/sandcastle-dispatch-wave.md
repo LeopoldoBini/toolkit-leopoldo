@@ -106,20 +106,29 @@ if [[ -f .sandcastle/resources.json ]]; then
     # Verify env_required are set on the host.
     ENV_MISSING=()
     ENV_COUNT=$(jq ".resources[$IDX].env_required | length" .sandcastle/resources.json)
-    for EIDX in $(seq 0 $((ENV_COUNT - 1))); do
-      EVAR=$(jq -r ".resources[$IDX].env_required[$EIDX]" .sandcastle/resources.json)
-      if [[ -z "${!EVAR:-}" ]]; then
-        # Try to source from .sandcastle/.env as fallback.
-        if [[ -f .sandcastle/.env ]]; then
-          EVAL=$(grep -E "^${EVAR}=" .sandcastle/.env | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
-          if [[ -n "$EVAL" ]]; then
-            export "$EVAR=$EVAL"
-            continue
+    # Guard: macOS `seq 0 -1` returns "0\n-1" (not empty as on GNU coreutils),
+    # which would iterate twice and produce phantom "null" entries.
+    if (( ENV_COUNT > 0 )); then
+      for EIDX in $(seq 0 $((ENV_COUNT - 1))); do
+        EVAR=$(jq -r ".resources[$IDX].env_required[$EIDX]" .sandcastle/resources.json)
+        # Use printenv instead of ${!EVAR:-} — indirect expansion + set -u/-e
+        # has been a landmine in this script.
+        EVAL_VALUE=$(printenv "$EVAR" || true)
+        if [[ -z "$EVAL_VALUE" ]]; then
+          # Try to source from .sandcastle/.env as fallback.
+          # `grep || true` so a no-match exit=1 doesn't kill the script under set -e
+          # (especially when piped: `grep | head | cut` propagates exit=1).
+          if [[ -f .sandcastle/.env ]]; then
+            EVAL=$( { grep -E "^${EVAR}=" .sandcastle/.env || true; } | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+            if [[ -n "$EVAL" ]]; then
+              export "$EVAR=$EVAL"
+              continue
+            fi
           fi
+          ENV_MISSING+=("$EVAR")
         fi
-        ENV_MISSING+=("$EVAR")
-      fi
-    done
+      done
+    fi
 
     if [[ ${#ENV_MISSING[@]} -gt 0 ]]; then
       if [[ "$R_POLICY" == "mandatory" ]]; then

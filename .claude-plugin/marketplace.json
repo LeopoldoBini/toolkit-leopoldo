@@ -9,11 +9,27 @@
   "plugins": [
     {
       "name": "engineering-workflow",
-      "description": "Unified engineering workflow (10 skills + /init-workflow command). The full pipeline: /grill-with-docs and /context-bootstrap (alignment + shared language), /to-prd, /to-issues, /agent-brief, /triage (backlog flow), /tdd-vertical, /diagnose, /zoom-out, /deep-modules (disciplined coding). Run /init-workflow once per repo to seed the pipeline order in CLAUDE.md. v2.3.0: /to-issues now generates the agent brief inline for every AFK slice (closes the gap where /triage was being skipped, leaving issues in ready-for-agent without a brief). /agent-brief gains a Reality-anchored principle + Real resources template section that validates concrete refs (table.column, endpoint, topic, key) against .sandcastle/probes/*.schema if cached.",
-      "version": "2.3.0",
+      "description": "Unified engineering workflow (11 skills + /init-workflow command). The full pipeline: /grill-with-docs and /context-bootstrap (alignment + shared language), /to-prd, /to-issues, /agent-brief, /triage (backlog flow), /tdd-vertical, /diagnose, /zoom-out, /deep-modules (disciplined coding), /prototype (throwaway design exploration). Run /init-workflow once per repo to seed the pipeline order in CLAUDE.md. v2.4.0: adopts upstream `prototype` skill (mattpocock/skills) verbatim — routes between a terminal TUI for state/logic prototypes and N radically different UI variants on one route for visual prototypes. v2.3.0: /to-issues generates the agent brief inline for every AFK slice; /agent-brief gains Reality-anchored principle + Real resources section validating refs against .sandcastle/probes/*.schema.",
+      "version": "2.4.0",
       "author": { "name": "Leopoldo Bini" },
       "source": "./plugins/engineering-workflow",
       "category": "engineering"
+    },
+    {
+      "name": "handoff",
+      "description": "Compact the current conversation into a handoff document for another agent to pick up. Saves a summary to the OS temp directory with a 'suggested skills' section, references existing artifacts (PRDs, plans, ADRs, issues, diffs) instead of duplicating them, and redacts secrets. Standalone — sibling of grill-me. Adopted verbatim from mattpocock/skills (MIT).",
+      "version": "1.0.0",
+      "author": { "name": "Leopoldo Bini" },
+      "source": "./plugins/handoff",
+      "category": "productivity"
+    },
+    {
+      "name": "caveman",
+      "description": "Ultra-compressed response mode as a SKILL (not output-style). Cuts ~75% tokens by dropping articles/filler/pleasantries while keeping full technical accuracy. Persists after trigger until user revokes. Auto-clarity exception for security warnings and destructive ops. Adopted verbatim from mattpocock/skills (MIT). Coexists with response-modes' caveman output-style — pick whichever activation model fits.",
+      "version": "1.0.0",
+      "author": { "name": "Leopoldo Bini" },
+      "source": "./plugins/caveman",
+      "category": "productivity"
     },
     {
       "name": "grill-me",

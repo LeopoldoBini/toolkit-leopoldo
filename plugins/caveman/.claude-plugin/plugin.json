@@ -1,0 +1,9 @@
+{
+  "name": "caveman",
+  "version": "1.0.0",
+  "description": "Ultra-compressed response mode as a SKILL (not output-style). Cuts ~75% tokens by dropping articles/filler/pleasantries while keeping full technical accuracy. Persists after trigger until user revokes. Auto-clarity exception for security warnings and destructive ops. Adopted verbatim from mattpocock/skills (MIT). Sibling/alternative to response-modes' caveman output-style — pick whichever activation model fits.",
+  "author": {
+    "name": "Leopoldo Bini",
+    "email": "raul.leopoldobini@gmail.com"
+  }
+}

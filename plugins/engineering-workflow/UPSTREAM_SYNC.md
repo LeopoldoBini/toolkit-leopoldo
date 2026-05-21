@@ -4,11 +4,15 @@ This plugin is forked from [mattpocock/skills](https://github.com/mattpocock/ski
 
 ## Last sync
 
-- **Date**: 2026-05-13
-- **Upstream commit**: `f304057` (Fix typo in prototype skill description for clarity)
-- **Fork commit before sync**: `7e82052` (single-brief invariant, v2.1.0 in commit message — never reflected in plugin.json)
-- **Resulting version**: 2.2.0
-- **Files touched**: 6 skills, 13 changes
+- **Date**: 2026-05-21
+- **Upstream commit**: `b8be62f` (HEAD as of sync)
+- **Fork commit before sync**: prior was `f304057` sync at 2026-05-13 (v2.3.0)
+- **Resulting version**: 2.4.0
+- **Files touched**: adopted `prototype` skill verbatim (SKILL.md + LOGIC.md + UI.md) into `skills/prototype/`. Also extracted `handoff` and `caveman` (productivity skills) as standalone plugins in toolkit-leopoldo — not part of engineering-workflow, but logged here since they came from the same upstream sync.
+
+## Sync history
+
+- **2026-05-13 → `f304057`**: 6 skills, 13 changes, v2.2.0 → v2.3.0 (see prior entry below).
 
 ## Meta-decision driving this sync
 
@@ -30,7 +34,7 @@ When reviewing a future upstream commit, **discard by default**:
 
 ## Adopt by default
 
-- **New skills upstream** that fill a genuine gap in the pipeline (e.g. `prototype`, `handoff` — pending evaluation as "adyacentes opcionales", not adopted in this sync).
+- **New skills upstream** that fill a genuine gap in the pipeline. Adopted 2026-05-21: `prototype` (engineering, lives inside engineering-workflow), `handoff` (productivity, extracted as its own plugin), `caveman` (productivity, extracted as its own plugin alongside the existing response-modes output-style). All adopted verbatim — no fork-specific deviations applied.
 - **Refinements to examples** that add concreteness (e.g. concrete code snippet in `OUT-OF-SCOPE.md`, anti-example with the actual vague phrase quoted).
 - **Cross-references to canonical format docs** (e.g. links to `CONTEXT-FORMAT.md`, `ADR-FORMAT.md`) — reduce drift when those formats evolve.
 - **Subagent delegations** (e.g. `subagent_type=Explore` for codebase walks) — keep main context clean.

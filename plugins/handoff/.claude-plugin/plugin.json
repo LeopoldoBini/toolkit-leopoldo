@@ -1,0 +1,9 @@
+{
+  "name": "handoff",
+  "version": "1.0.0",
+  "description": "Compact the current conversation into a handoff document for another agent to pick up. Saves a summary to the OS temp directory with a 'suggested skills' section, references existing artifacts instead of duplicating them, and redacts secrets. Adopted verbatim from mattpocock/skills (MIT).",
+  "author": {
+    "name": "Leopoldo Bini",
+    "email": "raul.leopoldobini@gmail.com"
+  }
+}

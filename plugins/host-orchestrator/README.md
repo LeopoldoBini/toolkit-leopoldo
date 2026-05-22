@@ -1,15 +1,16 @@
 # host-orchestrator
 
-Host-side orchestrator for parallel implementation **and** serial merge of GitHub issues and PRs. Runs entirely in your Claude Code session using **native subagents + worktree isolation** — no Docker, no Sandcastle SDK, no OAuth token extraction, no external CI.
+Host-side orchestrator for the full AFK pipeline (implementation + merge + goal-driven loop) using Claude Code's native primitives — subagents, worktree isolation, and `/goal` with its Haiku verifier. No Docker required (but supported for the heavy phases via `sandcastle-max` delegation).
 
-Two slash commands cover the two phases of the agent pipeline on host:
+Three slash commands:
 
-| Phase | Command | Mode | Volume sweet spot |
-|---|---|---|---|
-| Implement | `/parallel-implement-wave` | Parallel (sync, N subagents at once) | 2-6 issues |
-| Merge | `/merge-orchestrate` | Serial (one PR at a time, auto-pilot between) | 2-7 PRs |
+| Command | Phase | Mode |
+|---|---|---|
+| `/parallel-implement-wave` | Implementation | Sync parallel, N subagents in own worktrees, 2-6 issues |
+| `/merge-orchestrate` | Merge | Serial, one PR at a time, auto-pilot, 2-7 PRs |
+| `/afk-pipeline` (v2.1.0) | **Pipeline driver** | Per-turn playbook for `/goal`-wrapped sessions |
 
-Both commands share the same DNA: Claude Code's native primitives (`Agent` tool with `isolation: "worktree"`, sync parallel dispatch, host-side git mutations), custom Opus subagents, and the host as the **single point of remote mutation** (the subagents never push, never call `gh pr create`, never call `gh pr merge`).
+All share the same DNA: native CC primitives, custom Opus subagents, host as the **single point of remote mutation** (subagents never push, never `gh pr create`, never `gh pr merge`).
 
 ## Migration from `merge-orchestrator` v0.1.0
 
@@ -135,6 +136,150 @@ The `merge-resolver` subagent enforces these explicitly. Violation of any → em
 
 ---
 
+## `/afk-pipeline` — goal-driven AFK loop (v2.1.0)
+
+**Thin per-turn playbook** designed to run **inside a `/goal`-wrapped session** (Claude Code v2.1.139+). The combination gives you a truly autonomous agentic loop:
+
+- **`/goal <condition>`** (native) → Haiku verifier evaluates the condition between turns; if unmet, the harness re-invokes the main agent automatically. You don't write a loop.
+- **`/afk-pipeline --goal=<spec>`** (this plugin) → tells the main agent **what to do per turn**: inspect goal scope, pick the next productive action (merge if any PR ready, implement if any issue ready, report blocker, or declare done), update progress files, end the turn.
+
+Together they realize the AFK dream: type one command, walk away, come back when the goal is reached or a real blocker requires your attention.
+
+### Flags
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--goal=<spec>` | (required) | Scope: `milestone:<name>`, `label:<label>`, `parent:#N`, or `#42,#43,...` |
+| `--implement=host\|docker` | `docker` | Substrate for implementation waves |
+| `--merge=host\|docker` | `host` | Substrate for merge waves |
+
+Defaults (`docker+host`) reflect the combo Leo has tested as the most reliable: Docker for parallel implementation (isolation), host for serial merge (intent-aware speed).
+
+### State persistence
+
+Every turn writes:
+- **`.host-orchestrator/pipelines/<slug>.state.json`** — machine-readable phase history
+- **`PROGRESS.md`** — human-readable checklist + decisions + constraints (survives `/compact` because it's on disk, not in context)
+
+### Per-turn priority cascade
+
+Inside the playbook, the agent picks the FIRST matching action:
+
+1. **All DONE** → emit goal-completion message, end (verifier closes the loop)
+2. **Any MERGE_READY** → run merge wave (delegates to `/merge-orchestrate` or `/sandcastle-merge-wave`)
+3. **Any IMPLEMENTABLE** → run implement wave (delegates to `/parallel-implement-wave` or `/sandcastle-dispatch-wave`)
+4. **Only blocked-by-dep / human-gated remain** → report blockers, end (verifier sees no progress next turn → halts)
+5. **Some IN_REVIEW (PR open, not mergeable)** → describe blockers (failed checks, branch protection), end
+
+One action per turn. Auto-compact (set by env var) fires at safe boundaries between turns.
+
+### Examples
+
+```
+/afk-pipeline --goal=milestone:Q2-Checkout
+/afk-pipeline --goal=label:slice/checkout --implement=host
+/afk-pipeline --goal=#42,#43,#44,#45 --merge=docker
+/afk-pipeline --goal=parent:#100  # all issues with "Part of #100" in body
+```
+
+---
+
+## The `cc-afk` bash function (recommended entry point)
+
+Goal-driven AFK pipelines work best when you launch them with the right env vars already set (auto-compact threshold, max turns, etc.). The full incantation is verbose; wrap it in a shell function once.
+
+Add this to your `~/.zshrc` or `~/.bashrc`:
+
+```bash
+# AFK pipeline launcher — Claude Code with Leo's host-orchestrator + /goal
+cc-afk() {
+  if [ -z "$*" ]; then
+    echo "usage: cc-afk <goal-spec>"
+    echo "  examples:"
+    echo "    cc-afk milestone:Q2-Checkout"
+    echo "    cc-afk label:slice/checkout"
+    echo "    cc-afk \"#42,#43,#44,#45\""
+    return 1
+  fi
+  local goal="$*"
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000 \
+  CLAUDE_CODE_MAX_TURNS=50 \
+  CLAUDE_CODE_DISABLE_THINKING=1 \
+  CLAUDE_CODE_EFFORT_LEVEL=medium \
+  CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 \
+  CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING=1 \
+  DISABLE_TELEMETRY=1 \
+  API_TIMEOUT_MS=1200000 \
+  BASH_DEFAULT_TIMEOUT_MS=300000 \
+  BASH_MAX_TIMEOUT_MS=1200000 \
+    claude --dangerously-skip-permissions \
+      "/goal Todas las GH issues que matchean '$goal' están cerradas con su PR mergeado a la base branch (issue closed AND linked PR merged).
+
+Para avanzar en cada turn, ejecutá:
+  /afk-pipeline --goal=\"$goal\" --implement=docker --merge=host
+
+Mantené PROGRESS.md actualizado en la raíz del repo y .host-orchestrator/pipelines/<slug>.state.json. Una acción productiva por turn, no más."
+}
+
+# Variants (optional):
+cc-afk-host() {
+  local goal="$*"
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000 \
+  CLAUDE_CODE_MAX_TURNS=50 \
+  CLAUDE_CODE_DISABLE_THINKING=1 \
+  CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 \
+  DISABLE_TELEMETRY=1 \
+  API_TIMEOUT_MS=1200000 \
+  BASH_MAX_TIMEOUT_MS=1200000 \
+    claude --dangerously-skip-permissions \
+      "/goal Todas las GH issues que matchean '$goal' están cerradas con su PR mergeado.
+Ejecutá /afk-pipeline --goal=\"$goal\" --implement=host --merge=host"
+}
+
+cc-afk-docker() {
+  local goal="$*"
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000 \
+  CLAUDE_CODE_MAX_TURNS=50 \
+  CLAUDE_CODE_DISABLE_THINKING=1 \
+  CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 \
+  DISABLE_TELEMETRY=1 \
+  API_TIMEOUT_MS=1200000 \
+  BASH_MAX_TIMEOUT_MS=1200000 \
+    claude --dangerously-skip-permissions \
+      "/goal Todas las GH issues que matchean '$goal' están cerradas con su PR mergeado.
+Ejecutá /afk-pipeline --goal=\"$goal\" --implement=docker --merge=docker"
+}
+```
+
+### Usage
+
+```bash
+cc-afk milestone:Q2-Checkout       # default (docker impl + host merge)
+cc-afk-host label:slice/checkout   # full-host (no Docker required)
+cc-afk-docker "#42,#43,#44"        # full-sandcastle (Docker both phases)
+```
+
+### Env vars set by `cc-afk` and why
+
+| Variable | Value | Why |
+|---|---|---|
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | `180000` | Auto-compact at 180K tokens (~18% of 1M Opus window). Keeps context lean. |
+| `CLAUDE_CODE_MAX_TURNS` | `50` | Hard cap. Prevents runaway `/goal` loops if verifier never confirms. |
+| `CLAUDE_CODE_DISABLE_THINKING` | `1` | Disable extended thinking. AFK rewards velocity over depth. |
+| `CLAUDE_CODE_EFFORT_LEVEL` | `medium` | Balanced effort. `xhigh`/`max` is slow; `low` may miss nuance. |
+| `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` | `1` | No "rate this response" interruptions mid-AFK. |
+| `CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING` | `1` | `/rewind` not needed in AFK; saves overhead. |
+| `DISABLE_TELEMETRY` | `1` | Less network overhead. |
+| `API_TIMEOUT_MS` | `1200000` (20 min) | AFK tool calls can be long. |
+| `BASH_DEFAULT_TIMEOUT_MS` | `300000` (5 min) | Default for validate gates etc. |
+| `BASH_MAX_TIMEOUT_MS` | `1200000` (20 min) | Ceiling for long tests / installs. |
+
+### What `--dangerously-skip-permissions` means
+
+Equivalent to `--permission-mode bypassPermissions`. Saltea todos los permission prompts session-wide. **Solo usar en sesiones AFK** — para sesiones interactivas mantenés el modo normal con permission prompts.
+
+---
+
 ## Decision tree — when to use what
 
 ```
@@ -156,14 +301,15 @@ host-orchestrator/
 ├── plugin.json
 ├── README.md                              # this file
 ├── commands/
-│   ├── parallel-implement-wave.md         # /parallel-implement-wave
-│   └── merge-orchestrate.md               # /merge-orchestrate
+│   ├── parallel-implement-wave.md         # /parallel-implement-wave  (impl wave, host)
+│   ├── merge-orchestrate.md               # /merge-orchestrate        (merge wave, host)
+│   └── afk-pipeline.md                    # /afk-pipeline             (per-turn playbook for /goal-wrapped sessions)
 └── agents/
     ├── parallel-implementer.md            # Opus subagent for implementation
     └── merge-resolver.md                  # Opus subagent for merge / conflict
 ```
 
-No `skills/`. No auto-invocation by phrase. The slash commands are the only entry points by design — both actions have non-trivial blast radius and benefit from explicit invocation.
+No `skills/`. No auto-invocation by phrase. The slash commands are the only entry points by design — all actions have non-trivial blast radius and benefit from explicit invocation.
 
 ---
 

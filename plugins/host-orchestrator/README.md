@@ -10,7 +10,7 @@ Three slash commands:
 | `/merge-orchestrate` | Merge | Serial, one PR at a time, auto-pilot, 2-7 PRs |
 | `/afk-pipeline` (v2.1.0) | **Pipeline driver** | Per-turn playbook for `/goal`-wrapped sessions |
 
-All share the same DNA: native CC primitives, custom Opus subagents, host as the **single point of remote mutation** (subagents never push, never `gh pr create`, never `gh pr merge`).
+All share the same DNA: native CC primitives, custom subagents (Fable 5 for implementation, Opus for merge), host as the **single point of remote mutation** (subagents never push, never `gh pr create`, never `gh pr merge`).
 
 ## Migration from `merge-orchestrator` v0.1.0
 
@@ -35,7 +35,7 @@ If you had memory references to `merge-orchestrator` as a plugin name, update th
 
 ## `/parallel-implement-wave` — host-native parallel implementation
 
-Dispatches 2-6 GitHub issues for parallel implementation. Each issue gets its own `parallel-implementer` Opus subagent in an isolated git worktree (created by Claude Code via `isolation: "worktree"`). Host blocks until all subagents return their XML envelopes, then per result runs validation → push → `gh pr create`.
+Dispatches 2-6 GitHub issues for parallel implementation. Each issue gets its own `parallel-implementer` Fable 5 subagent in an isolated git worktree (created by Claude Code via `isolation: "worktree"`). Host blocks until all subagents return their XML envelopes, then per result runs validation → push → `gh pr create`.
 
 ### Mental model
 
@@ -45,7 +45,7 @@ Host:  pre-flight → dep graph → preview → confirm → compose prompts
 Host:  [Agent(#42), Agent(#43), Agent(#44), Agent(#45)]   (parallel, one message)
                 ↓         ↓         ↓         ↓
             worktree  worktree  worktree  worktree     (isolated, native)
-            Opus impl Opus impl Opus impl Opus impl    (TDD + vertical slice)
+            Fable 5   Fable 5   Fable 5   Fable 5      (TDD + vertical slice)
                 ↓         ↓         ↓         ↓
             <impl-    <impl-    <impl-    <impl-
              result>   result>   result>   result>
@@ -59,7 +59,7 @@ Host:  stash pop → final report + audit log path
 
 ### Discipline of the subagent
 
-The `parallel-implementer` Opus subagent (`agents/parallel-implementer.md`) is bound by:
+The `parallel-implementer` Fable 5 subagent (`agents/parallel-implementer.md`) is bound by:
 
 1. **Vertical slice definition**: must touch all relevant layers of the user story (entry + middle + destination + observable output), not a horizontal cut.
 2. **TDD red-green-reality-first per criterion**: one failing test per acceptance criterion before implementation, against real resources (DB / HTTP / queues reachable from the host).
@@ -71,7 +71,7 @@ The `parallel-implementer` Opus subagent (`agents/parallel-implementer.md`) is b
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `--max-parallel=N` | `6` | Cap of simultaneous subagents. Hard ceiling 8 with soft warning when >6 (Opus quota burn). |
+| `--max-parallel=N` | `6` | Cap of simultaneous subagents. Hard ceiling 8 with soft warning when >6 (quota burn). |
 | `--issues=#42,#43` | (auto) | Explicit list; skips dep-graph discovery. |
 | `--dry-run` | `false` | Pre-flight + preview, no dispatch. |
 | `--resume` | `false` | Process orphan worktrees from prior waves only. |
@@ -263,7 +263,7 @@ cc-afk-docker "#42,#43,#44"        # full-sandcastle (Docker both phases)
 
 | Variable | Value | Why |
 |---|---|---|
-| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | `180000` | Auto-compact at 180K tokens (~18% of 1M Opus window). Keeps context lean. |
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | `180000` | Auto-compact at 180K tokens (~18% of the 1M context window). Keeps context lean. |
 | `CLAUDE_CODE_MAX_TURNS` | `50` | Hard cap. Prevents runaway `/goal` loops if verifier never confirms. |
 | `CLAUDE_CODE_DISABLE_THINKING` | `1` | Disable extended thinking. AFK rewards velocity over depth. |
 | `CLAUDE_CODE_EFFORT_LEVEL` | `medium` | Balanced effort. `xhigh`/`max` is slow; `low` may miss nuance. |
@@ -305,7 +305,7 @@ host-orchestrator/
 │   ├── merge-orchestrate.md               # /merge-orchestrate        (merge wave, host)
 │   └── afk-pipeline.md                    # /afk-pipeline             (per-turn playbook for /goal-wrapped sessions)
 └── agents/
-    ├── parallel-implementer.md            # Opus subagent for implementation
+    ├── parallel-implementer.md            # Fable 5 subagent for implementation
     └── merge-resolver.md                  # Opus subagent for merge / conflict
 ```
 
@@ -317,7 +317,7 @@ No `skills/`. No auto-invocation by phrase. The slash commands are the only entr
 
 - `gh` CLI configured (`gh auth login`) — for PR + issue + comment + label operations.
 - A git repo with the base branch (current `HEAD`) tracking a remote.
-- Opus access on your Claude account (subagents force `model: opus`).
+- Fable 5 + Opus access on your Claude account (`parallel-implementer` forces `model: fable`; `merge-resolver` forces `model: opus`).
 - For `/parallel-implement-wave`: GH issues labeled `ready-for-agent` (or `state/ready-for-agent`) with a `## Agent Brief` comment following the engineering-workflow ≥ 2.1.0 single-brief invariant.
 
 ## What this plugin does NOT do

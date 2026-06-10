@@ -1,6 +1,6 @@
 ---
 name: parallel-implement-wave
-description: Dispatch a wave of 2-6 GitHub issues for parallel implementation on host using Claude Code's native subagent + worktree isolation (no Docker, no Sandcastle SDK). Each issue gets its own `parallel-implementer` Opus subagent in an isolated worktree; host validates + pushes + opens PRs. Usage `/parallel-implement-wave` (auto-discover ready-for-agent issues) or `/parallel-implement-wave --issues=#42,#43,#44`. Flags `--max-parallel=N` (default 6, hard ceiling 8), `--dry-run`, `--resume`, `--clean-worktrees`, `--keep-worktrees`.
+description: Dispatch a wave of 2-6 GitHub issues for parallel implementation on host using Claude Code's native subagent + worktree isolation (no Docker, no Sandcastle SDK). Each issue gets its own `parallel-implementer` Fable 5 subagent in an isolated worktree; host validates + pushes + opens PRs. Usage `/parallel-implement-wave` (auto-discover ready-for-agent issues) or `/parallel-implement-wave --issues=#42,#43,#44`. Flags `--max-parallel=N` (default 6, hard ceiling 8), `--dry-run`, `--resume`, `--clean-worktrees`, `--keep-worktrees`.
 ---
 
 # /parallel-implement-wave
@@ -17,7 +17,7 @@ Use this command when you want parallel implementation without Docker overhead, 
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `--max-parallel=N` | `6` | Cap on simultaneous subagents. Hard ceiling 8; values > 6 emit a soft warning ("above recommended Opus parallel cap"). |
+| `--max-parallel=N` | `6` | Cap on simultaneous subagents. Hard ceiling 8; values > 6 emit a soft warning ("above recommended Fable 5 parallel cap"). |
 | `--issues=#42,#43,#44` | (auto) | Explicit issue list; skips dep-graph discovery. Mutually exclusive with `--resume`. |
 | `--dry-run` | `false` | Pre-flight + dep graph + preview, no dispatch. |
 | `--resume` | `false` | Process orphan worktrees from prior waves; no new dispatch. Mutually exclusive with `--issues`, `--dry-run`. |

@@ -1,6 +1,7 @@
 ---
 name: to-issues
-description: Break a plan, spec, or PRD into independently-grabbable issues using tracer-bullet vertical slices. Use when user wants to convert a plan into issues, create implementation tickets, break down work into issues, or says "to issues", "armá los tickets", "rompé esto en issues", "vertical slices".
+description: Break a plan, spec, or PRD into independently-grabbable issues using tracer-bullet vertical slices. Explicit invocation only — the user types /to-issues; the model must never decide to run this on its own (e.g. as a step of "applying" a review or plan).
+disable-model-invocation: true
 ---
 
 # To Issues

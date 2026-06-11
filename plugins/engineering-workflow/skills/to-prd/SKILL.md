@@ -1,6 +1,7 @@
 ---
 name: to-prd
-description: Turn the current conversation context into a PRD without re-interviewing the user. Synthesizes what's already been discussed and proposes module-level structure before publishing. Use when user says "write a PRD", "armá un PRD", "convertí esto en PRD", or wants to formalize current context into a product spec.
+description: Turn the current conversation context into a PRD without re-interviewing the user. Synthesizes what's already been discussed and proposes module-level structure before publishing. Explicit invocation only — the user types /to-prd; the model must never decide to run this on its own.
+disable-model-invocation: true
 ---
 
 # To PRD

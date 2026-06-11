@@ -5,6 +5,15 @@ description: Dispatch a wave of 2-6 GitHub issues for parallel implementation on
 
 # /parallel-implement-wave
 
+## ⛔ Invocation gate — check BEFORE doing anything
+
+Proceed ONLY if one of these holds:
+
+1. The user explicitly typed `/parallel-implement-wave` (or `/afk-pipeline`, whose playbook delegates here) in this session.
+2. You are inside an active AFK pipeline run (`/goal`-wrapped session launched via `cc-afk`; `.host-orchestrator/pipelines/*.state.json` exists for the current goal).
+
+If you reached this command any other way — e.g. you decided on your own that "applying fixes", "implementing the plan" or finishing a review warrants creating issues and dispatching subagents — **STOP NOW**. Do not create issues, do not dispatch anything. Tell Leo what you would run and let HIM invoke it. Rule of this marketplace: orchestration commands are never auto-invoked by the model.
+
 Self-contained command. Dispatches a host-native parallel implementation wave: N `parallel-implementer` subagents in parallel, each in its own worktree (`isolation: "worktree"`), one per eligible GH issue. Sync parallel: host blocks until all subagents return. Per result, host validates + pushes + opens PR. **Validation gate is blocking** — red typecheck/tests → no PR opened.
 
 Use this command when you want parallel implementation without Docker overhead, for batches of 2-6 small/medium tickets. Above 6 tickets or with mixed runtimes, prefer `/sandcastle-dispatch-wave` (Docker).

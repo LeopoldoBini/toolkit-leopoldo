@@ -5,6 +5,10 @@ description: Thin playbook for goal-driven AFK pipelines. Designed to run inside
 
 # /afk-pipeline
 
+## ⛔ Invocation gate — check BEFORE doing anything
+
+Proceed ONLY if the user explicitly launched this pipeline: they typed `/afk-pipeline` themselves, or the session's initial prompt (e.g. via the `cc-afk` alias) instructs running it under `/goal`. If instead YOU decided that some plan, review result, or "apply everything" request should become an AFK pipeline — **STOP NOW**: do not create issues, do not dispatch waves. Tell Leo what you would run and let HIM invoke it. Rule of this marketplace: orchestration commands are never auto-invoked by the model.
+
 **Thin playbook** for AFK (away-from-keyboard) goal-driven pipelines. This command is designed to be invoked **inside a `/goal`-wrapped session**:
 
 - `/goal` (native, Claude Code v2.1.139+) handles the **loop**: a Haiku verifier evaluates the goal condition between turns; if unmet, the harness re-invokes the main agent.

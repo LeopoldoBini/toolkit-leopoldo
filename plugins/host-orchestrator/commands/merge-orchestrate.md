@@ -5,6 +5,15 @@ description: Serial intent-aware merge of N open PRs in the current repo. Host-o
 
 # /merge-orchestrate
 
+## ⛔ Invocation gate — check BEFORE doing anything
+
+Proceed ONLY if one of these holds:
+
+1. The user explicitly typed `/merge-orchestrate` (or `/afk-pipeline`, whose playbook delegates here) in this session.
+2. You are inside an active AFK pipeline run (`/goal`-wrapped session launched via `cc-afk`; `.host-orchestrator/pipelines/*.state.json` exists for the current goal).
+
+If you reached this command any other way — e.g. you decided on your own that some open PRs "should be merged now" — **STOP NOW**. Do not merge anything. Tell Leo what you would run and let HIM invoke it. Rule of this marketplace: orchestration commands are never auto-invoked by the model.
+
 Self-contained command. Orchestrates a serial, intent-aware merge of N open GitHub PRs entirely on host — no Docker, no Sandcastle SDK, no external CI. Uses the `merge-resolver` custom subagent (Opus) per PR for intent verification and conflict resolution, with the host as the single point of git mutation.
 
 **When to use:**

@@ -73,6 +73,16 @@ Single final report:
 
 End with a TL;DR (estado final + pendientes de decisión), per Leo's communication preferences.
 
+## After a report-only run: what "apply the fixes" means
+
+If, after seeing the report, the user says "aplicá las correcciones", "apliquemos", "dale, aplicá todo" or similar, that means EXACTLY ONE thing: **run Phase 3 appliers now, in this session, over the judge's APLICAR list.** It does NOT mean:
+
+- creating GitHub issues or invoking `/to-issues`,
+- writing a PRD or invoking `/to-prd`,
+- dispatching host-orchestrator waves (`/parallel-implement-wave`, `/merge-orchestrate`, `/afk-pipeline`) or any other orchestration flow.
+
+Never escalate to those flows on your own — only if the user names them explicitly. (This rule exists because it happened: a review ended with "apliquemos la corrección completa" and the agent created issues and dispatched implementation waves.)
+
 ## Invariants
 
 - Reviewers and judge never modify code. Without `--apply`, NOBODY modifies code — the deliverable is the judged report.

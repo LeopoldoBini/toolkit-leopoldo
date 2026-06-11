@@ -9,9 +9,11 @@
   "plugins": [
     {
       "name": "engineering-workflow",
-      "description": "Unified engineering workflow (11 skills + /init-workflow command). The full pipeline: /grill-with-docs and /context-bootstrap (alignment + shared language), /to-prd, /to-issues, /agent-brief, /triage (backlog flow), /tdd-vertical, /diagnose, /zoom-out, /deep-modules (disciplined coding), /prototype (throwaway design exploration). Run /init-workflow once per repo to seed the pipeline order in CLAUDE.md. v2.4.0: adopts upstream `prototype` skill (mattpocock/skills) verbatim — routes between a terminal TUI for state/logic prototypes and N radically different UI variants on one route for visual prototypes. v2.3.0: /to-issues generates the agent brief inline for every AFK slice; /agent-brief gains Reality-anchored principle + Real resources section validating refs against .sandcastle/probes/*.schema.",
-      "version": "2.4.0",
-      "author": { "name": "Leopoldo Bini" },
+      "description": "Unified engineering workflow (12 skills + /init-workflow command). The full pipeline: /grill-with-docs and /context-bootstrap (alignment + shared language), /to-prd, /to-issues, /agent-brief, /triage (backlog flow), /tdd-vertical, /diagnose, /zoom-out, /deep-modules (disciplined coding), /prototype (throwaway design exploration), /review-fleet (multi-agent review: parallel reviewers per module → judge rules APLICAR/RECHAZAR/HUMANO; report-only by default, --apply runs appliers on best model). Run /init-workflow once per repo to seed the pipeline order in CLAUDE.md. v2.4.0: adopts upstream `prototype` skill (mattpocock/skills) verbatim — routes between a terminal TUI for state/logic prototypes and N radically different UI variants on one route for visual prototypes. v2.3.0: /to-issues generates the agent brief inline for every AFK slice; /agent-brief gains Reality-anchored principle + Real resources section validating refs against .sandcastle/probes/*.schema.",
+      "version": "2.6.0",
+      "author": {
+        "name": "Leopoldo Bini"
+      },
       "source": "./plugins/engineering-workflow",
       "category": "engineering"
     },
@@ -19,7 +21,9 @@
       "name": "handoff",
       "description": "Compact the current conversation into a handoff document for another agent to pick up. Saves a summary to the OS temp directory with a 'suggested skills' section, references existing artifacts (PRDs, plans, ADRs, issues, diffs) instead of duplicating them, and redacts secrets. Standalone — sibling of grill-me. Adopted verbatim from mattpocock/skills (MIT).",
       "version": "1.0.0",
-      "author": { "name": "Leopoldo Bini" },
+      "author": {
+        "name": "Leopoldo Bini"
+      },
       "source": "./plugins/handoff",
       "category": "productivity"
     },
@@ -27,7 +31,9 @@
       "name": "caveman",
       "description": "Ultra-compressed response mode as a SKILL (not output-style). Cuts ~75% tokens by dropping articles/filler/pleasantries while keeping full technical accuracy. Persists after trigger until user revokes. Auto-clarity exception for security warnings and destructive ops. Adopted verbatim from mattpocock/skills (MIT). Coexists with response-modes' caveman output-style — pick whichever activation model fits.",
       "version": "1.0.0",
-      "author": { "name": "Leopoldo Bini" },
+      "author": {
+        "name": "Leopoldo Bini"
+      },
       "source": "./plugins/caveman",
       "category": "productivity"
     },
@@ -35,7 +41,9 @@
       "name": "grill-me",
       "description": "Stress-test plans through relentless interviewing — walks the decision tree branch by branch, one question at a time, exploring the codebase when answers live there. Triggers: 'grill me', 'pressure test', 'poke holes', 'play devil's advocate', 'validar plan', 'discutir antes de implementar'. Standalone — useful for non-code planning sessions where engineering-workflow is overkill.",
       "version": "1.0.0",
-      "author": { "name": "Leopoldo Bini" },
+      "author": {
+        "name": "Leopoldo Bini"
+      },
       "source": "./plugins/grill-me",
       "category": "alignment"
     },
@@ -43,7 +51,9 @@
       "name": "memory-flow",
       "description": "CLAUDE.md + MEMORY.md flow: /revisar_memoria audita y detecta entradas para graduar; /actualizar_memoria implementa las recomendaciones. Incluye agent claude-memory-auditor para auditorías exhaustivas. Alineado con la política de 3 artefactos (CLAUDE.md = arquitectura, MEMORY.md = aprendizajes sesionales, CONTEXT.md = vocabulario de dominio).",
       "version": "1.0.0",
-      "author": { "name": "Leopoldo Bini" },
+      "author": {
+        "name": "Leopoldo Bini"
+      },
       "source": "./plugins/memory-flow",
       "category": "productivity"
     },
@@ -51,7 +61,9 @@
       "name": "review-flow",
       "description": "Checkpoints pre y post ejecución: /analizar verifica comprensión antes de ejecutar (ideal para dictados por voz o instrucciones ambiguas); /revisar_trabajo aplica revisión crítica post-implementación. Incluye agent revisor_de_trabajo para análisis exhaustivos sin modificar código.",
       "version": "1.0.0",
-      "author": { "name": "Leopoldo Bini" },
+      "author": {
+        "name": "Leopoldo Bini"
+      },
       "source": "./plugins/review-flow",
       "category": "productivity"
     },
@@ -59,15 +71,19 @@
       "name": "response-modes",
       "description": "Optional output styles for response tone/format. Caveman: ultra-terse, drops filler. No-TLDR: overrides the always-on TL;DR rule for fluid chat. Toggle via /output-style or settings.",
       "version": "1.0.0",
-      "author": { "name": "Leopoldo Bini" },
+      "author": {
+        "name": "Leopoldo Bini"
+      },
       "source": "./plugins/response-modes",
       "category": "productivity"
     },
     {
       "name": "host-orchestrator",
-      "description": "Host-side orchestration of the full AFK pipeline — implementation + merge + goal-driven loop — using Claude Code's NATIVE primitives (subagents, worktree isolation, `/goal` v2.1.139+ with Haiku verifier). Three slash commands (no auto-invocable skills, explicit invocation only): (1) `/parallel-implement-wave` dispatches 2-6 ready-for-agent GH issues in sync parallel (1 host message, N Agent calls with `isolation: \"worktree\"`); per result host validates (cascade auto-detect or `scripts/sandcastle-validate.sh`), renames branch `agent/<base-slug>/issue-N`, pushes, opens PR with label `afk-agent-pr`. (2) `/merge-orchestrate` runs intent-aware serial merge of 2-7 open PRs (cascade intent gathering, topological order from `Blocked by` + file-overlap risk pairs, ephemeral worktrees, cascade validation, dispatches `merge-resolver` Opus subagent enforcing 5 no-regression criteria, host executes squash --delete-branch). (3) `/afk-pipeline` (v2.1.0) thin per-turn playbook designed for `/goal`-wrapped sessions: inspects goal scope (milestone/label/parent/explicit list), picks ONE next productive action (merge if any PR ready, implement if any issue ready, report blocker, or declare done), updates PROGRESS.md + state.json, ends turn — the `/goal` Haiku verifier handles re-invocation between turns. Flags `--implement=host|docker` + `--merge=host|docker` (default `docker+host`). Recommended entry point: `cc-afk <goal>` bash function (in README) that exports AFK-tuned env vars (`CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000`, `CLAUDE_CODE_MAX_TURNS=50`, `CLAUDE_CODE_DISABLE_THINKING=1`, `API_TIMEOUT_MS=1200000`, etc.) then launches `claude --dangerously-skip-permissions` with `/goal` wrapping `/afk-pipeline`. Custom subagents: `parallel-implementer` (Fable 5; TDD red-green-reality-first per criterion, vertical-slice discipline, 7 anti-mock anti-patterns, bronze rule self-check) and `merge-resolver` (Opus; 5 criteria, emits `<action>` + `<resolution>` XML, never pushes). Host owns all remote mutations. Audit log append-only `.host-orchestrator/waves/<ts>.log`. Smart-wave retry. Orphan-worktree handling via `--resume` / `--clean-worktrees`. Delegates Docker phases to sandcastle-max when `--implement=docker` or `--merge=docker`. Renamed from `merge-orchestrator` v0.1.0 in v2.0.0; v2.1.0 adds `/afk-pipeline` (additive, non-breaking); v2.2.0 moves `parallel-implementer` to Fable 5 (`model: fable`), `merge-resolver` stays Opus.",
-      "version": "2.2.0",
-      "author": { "name": "Leopoldo Bini" },
+      "description": "Host-side orchestration of the full AFK pipeline — implementation + merge + goal-driven loop — using Claude Code's NATIVE primitives (subagents, worktree isolation, `/goal` v2.1.139+ with Haiku verifier). Three slash commands (no auto-invocable skills, explicit invocation only): (1) `/parallel-implement-wave` dispatches 2-6 ready-for-agent GH issues in sync parallel (1 host message, N Agent calls with `isolation: \"worktree\"`); per result host validates (cascade auto-detect or `scripts/sandcastle-validate.sh`), renames branch `agent/<base-slug>/issue-N`, pushes, opens PR with label `afk-agent-pr`. (2) `/merge-orchestrate` runs intent-aware serial merge of 2-7 open PRs (cascade intent gathering, topological order from `Blocked by` + file-overlap risk pairs, ephemeral worktrees, cascade validation, dispatches `merge-resolver` Opus subagent enforcing 5 no-regression criteria, host executes squash --delete-branch). (3) `/afk-pipeline` (v2.1.0) thin per-turn playbook designed for `/goal`-wrapped sessions: inspects goal scope (milestone/label/parent/explicit list), picks ONE next productive action (merge if any PR ready, implement if any issue ready, report blocker, or declare done), updates PROGRESS.md + state.json, ends turn — the `/goal` Haiku verifier handles re-invocation between turns. Flags `--implement=host|docker` + `--merge=host|docker` (default `docker+host`). Recommended entry point: `cc-afk <goal>` bash function (in README) that exports AFK-tuned env vars (`CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000`, `CLAUDE_CODE_MAX_TURNS=50`, `CLAUDE_CODE_DISABLE_THINKING=1`, `API_TIMEOUT_MS=1200000`, etc.) then launches `claude --dangerously-skip-permissions` with `/goal` wrapping `/afk-pipeline`. Custom subagents: `parallel-implementer` (Fable 5; TDD red-green-reality-first per criterion, vertical-slice discipline, 7 anti-mock anti-patterns, bronze rule self-check) and `merge-resolver` (Opus; 5 criteria, emits `<action>` + `<resolution>` XML, never pushes). Host owns all remote mutations. Audit log append-only `.host-orchestrator/waves/<ts>.log`. Smart-wave retry. Orphan-worktree handling via `--resume` / `--clean-worktrees`. Delegates Docker phases to sandcastle-max when `--implement=docker` or `--merge=docker`. Renamed from `merge-orchestrator` v0.1.0 in v2.0.0; v2.1.0 adds `/afk-pipeline` (additive, non-breaking); v2.2.0 moves `parallel-implementer` to Fable 5 (`model: fable`), `merge-resolver` stays Opus. v2.3.x: /afk-pipeline adds a final review wave — once all issues merge, it invokes /review-fleet --apply (engineering-workflow ≥ 2.6.0); approved fixes land as one review/<slug> PR via the normal merge wave.",
+      "version": "2.3.1",
+      "author": {
+        "name": "Leopoldo Bini"
+      },
       "source": "./plugins/host-orchestrator",
       "category": "engineering"
     },
@@ -75,7 +91,9 @@
       "name": "sandcastle-max",
       "description": "AFK Claude Code agents en Docker contra tu Claude Max subscription (vía CLAUDE_CODE_OAUTH_TOKEN, workaround para Sandcastle issue #191 wontfix). v0.9.1: bugfix — Claude Code guarda credenciales en Keychain como JSON wrapper `{\"claudeAiOauth\":{\"accessToken\":...}}`; los comandos extraían el JSON crudo y el container devolvía `401 Invalid bearer token`. Ahora todos los comandos (sandcastle-run, sandcastle-dispatch-wave, sandcastle-pipeline, sandcastle-merge-wave) y la skill `sandcastle-afk` parsean con jq y exportan solo `.claudeAiOauth.accessToken`, con fallback a token raw para compat. v0.9.0: API declarativa para Docker capabilities/devices/post-create hook vía bloque `docker` en .sandcastle/config.json — habilita Netbird-in-container (NET_ADMIN + /dev/net/tun + post-create hook) para que AFK agents alcancen recursos VPN-only (ej: stand-by DB) durante su loop, evitando queries blind contra schemas imaginados. Patch al @ai-hero/sandcastle@0.5.10 incluido en runtime/patches/, aplicado via bun.patchedDependencies en el primer /sandcastle-init. v0.8.0 sigue vigente: bootstrap del schema cache standalone vía /sandcastle-probe-resources (host-only, no containers) — cachea schemas a .sandcastle/probes/<name>.schema que engineering-workflow >=2.3.0 lee desde /to-issues y /agent-brief para anchor briefs a refs reales (verifica table.column, endpoint, topic, key). v0.7.0: .sandcastle/resources.json declara recursos externos (DB/HTTP/queue/etc) con policy mandatory|optional; 3 niveles de defensa (Level 1 host pre-flight, Level 2 container connectivity, Level 3 container schema diff); runtime/main.mts propaga env_required al agentEnv; prompt enforza red-green-reality-first. v0.6.0 stack-aware scaffold: Dockerfile compuesto per-project desde snippets (Node/Bun/.NET/Python/Go/Ruby/Rust/polyglot) + agent layer con UID surgery. Slash commands: /sandcastle-init, /sandcastle-probe-resources, /sandcastle-build, /sandcastle-run, /sandcastle-dispatch-wave, /sandcastle-merge-wave, /sandcastle-pipeline. Per-project image: sandcastle-<repo-basename>.",
       "version": "0.9.1",
-      "author": { "name": "Leopoldo Bini" },
+      "author": {
+        "name": "Leopoldo Bini"
+      },
       "source": "./plugins/sandcastle-max",
       "category": "engineering"
     }

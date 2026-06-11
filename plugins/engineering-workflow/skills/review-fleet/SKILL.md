@@ -22,7 +22,15 @@ From `$ARGUMENTS`, resolve ONE of:
 - **`module <name>` / a path** — that module or directory.
 - **`app` / "toda la app"** — the whole codebase.
 
-Then split the scope into **review units**: the distinct modules/areas it spans (use `CONTEXT.md` domain language and repo structure to draw lines). If the user didn't enumerate them, identify them yourself — do not ask. For a whole-app review on a small codebase (≲ 20 source files), one unit is fine; otherwise one unit per module.
+### Step 1 — Integral analysis FIRST
+
+Before partitioning anything, study the scope **as one integrated whole**: read the full diff (all PRs/commits in scope together, not one by one), map which modules it touches, and how the touched pieces interact — new seams, changed contracts, shared state. This pass is yours (the orchestrating agent's); its output is the map you partition from. Skipping it and jumping straight to per-PR review is the failure mode this skill exists to avoid.
+
+### Step 2 — Re-partition into review units
+
+Split the scope into **review units** = cohesive review surfaces of the FINAL state. Draw lines using `CONTEXT.md` domain language and repo structure — NOT the implementation history. How the work was dispatched (waves, issues, PRs) reflects scheduling convenience; the review partition must be fresh: a unit is a module plus its seams as the code stands now, even if it was built across three different waves. If the user didn't enumerate units, identify them yourself — do not ask.
+
+**How many units:** size each unit to what one reviewer can actually hold — one module (or a few tightly coupled files) plus the interfaces it exposes/consumes, roughly ≤ ~1.5k lines of relevant code. Minimum 1 (small scope or small codebase, ≲ 20 source files → review it whole). Cap ~6 units per wave; if the scope demands more, queue additional waves rather than diluting reviewers. State the partition and why before launching: "N units: X, Y, Z — because …".
 
 ## Phase 1 — Reviewers (parallel, read-only)
 
@@ -31,7 +39,9 @@ Launch read-only subagents in parallel. Two lenses, always:
 1. **Architecture lens** — per review unit, one subagent applying the `deep-modules` skill criteria (depth, seams, deletion test, interface-as-test-surface) restricted to that unit. Tell it to read `CONTEXT.md` and `docs/adr/` first if they exist.
 2. **Implementation lens** — per review unit, one subagent doing critical implementation review: correctness bugs, security (OWASP), error handling, consistency with the project's conventions, code smells. If the `review-flow` plugin is installed, use its `revisor_de_trabajo` agent for this lens; otherwise a general subagent with those criteria.
 
-Scale: 2 subagents total for a single-unit scope; one pair per unit when there are several (cap ~6 units per wave; queue the rest). Each reviewer must return **structured findings**: `title · file:line · severity (alta/media/baja) · why it matters · proposed fix`. No prose reports.
+3. **Integration lens** — when there are 2+ units, ONE extra subagent that reviews only the seams BETWEEN units: the contracts, data flow and invariants the integral analysis (Phase 0, Step 1) surfaced. Per-unit reviewers can't see these; this is where multi-wave implementations break.
+
+Scale: 2 subagents total for a single-unit scope; one pair per unit plus the integration reviewer when there are several (cap ~6 units per wave; queue the rest). Each reviewer must return **structured findings**: `title · file:line · severity (alta/media/baja) · why it matters · proposed fix`. No prose reports.
 
 ## Phase 2 — Judge
 

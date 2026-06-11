@@ -1,6 +1,6 @@
 ---
 name: afk-pipeline
-description: Thin playbook for goal-driven AFK pipelines. Designed to run inside a `/goal`-wrapped session — Claude Code's native `/goal` handles the verifier loop (Haiku evaluates condition between turns); this command tells the model WHAT to do in each productive turn. Per turn checks current state (open issues / open PRs) and dispatches the next action: implement wave (via `/parallel-implement-wave` host OR `/sandcastle-dispatch-wave` Docker) or merge wave (via `/merge-orchestrate` host OR `/sandcastle-merge-wave` Docker). Maintains PROGRESS.md + state.json for resumability. Defaults `--implement=docker --merge=host` (Leo's tested combo). Usage `/afk-pipeline --goal=<spec>`. Flags `--implement=host\|docker`, `--merge=host\|docker`.
+description: Thin playbook for goal-driven AFK pipelines. Designed to run inside a `/goal`-wrapped session — Claude Code's native `/goal` handles the verifier loop (Haiku evaluates condition between turns); this command tells the model WHAT to do in each productive turn. Per turn checks current state (open issues / open PRs) and dispatches the next action: implement wave (via `/parallel-implement-wave` host OR `/sandcastle-dispatch-wave` Docker), merge wave (via `/merge-orchestrate` host OR `/sandcastle-merge-wave` Docker), or — once all issues are merged — a final review wave (via `/review-fleet`, engineering-workflow: reviewers → judge → appliers; fixes land as one more PR through the normal merge wave). Maintains PROGRESS.md + state.json for resumability. Defaults `--implement=docker --merge=host` (Leo's tested combo). Usage `/afk-pipeline --goal=<spec>`. Flags `--implement=host\|docker`, `--merge=host\|docker`.
 ---
 
 # /afk-pipeline
@@ -117,11 +117,18 @@ Bucket each issue into ONE of:
 
 Priority cascade (first match wins):
 
-1. **All DONE** → emit goal-completion message: "Goal `$GOAL_SPEC` reached: $K/$N issues merged." Update PROGRESS.md final summary. End turn. (The `/goal` verifier will confirm and close.)
+1. **All DONE and `review.status == "done"`** → emit goal-completion message: "Goal `$GOAL_SPEC` reached: $K/$N issues merged + review fleet applied." Update PROGRESS.md final summary. End turn. (The `/goal` verifier will confirm and close.)
+
+1b. **All issues DONE but `review.status` is null** → run the **review wave** (Leo always does this manually after AFK work; now it's part of the pipeline):
+   - Invoke `/review-fleet` (engineering-workflow ≥ 2.5.0) with scope = the goal spec (`epic`/`milestone`/issue list), so it reviews exactly what this pipeline merged. It runs reviewers (deep-modules + critical implementation, per module) → judge (rules each finding APLICAR/RECHAZAR/HUMANO) → appliers on the best available model.
+   - If the judge approves nothing → set `review.status = "done"`, note "review clean" in PROGRESS.md. End turn.
+   - If fixes were applied → commit them on branch `review/<slug>`, open ONE PR labeled `afk-agent-pr` + `review-fix`, set `review.status = "pr_open"` + `review.pr = <N>`. End turn. (Next turns: the PR rides the normal merge wave; when it merges, set `review.status = "done"`.)
+   - Findings ruled HUMANO go to PROGRESS.md under "Decisiones / constraints" — they do NOT block goal completion.
 
 2. **Any MERGE_READY** → run a merge wave on them:
    - If `--merge=host` → invoke `/merge-orchestrate` with the explicit PR list.
    - If `--merge=docker` → invoke `/sandcastle-merge-wave` (Docker).
+   - If the review PR (`review.pr`) was among the merged → set `review.status = "done"`.
    - After: re-read state, append phase to `phases_history`, update `PROGRESS.md`. End turn.
 
 3. **Any IMPLEMENTABLE** → run an implementation wave on them (cap by `--max-parallel` of the underlying command):
@@ -203,9 +210,15 @@ Leo decides whether to compact manually. You cannot trigger `/compact` yourself;
     }
   ],
   "last_phase": "phase-002",
-  "last_status": "MERGE_COMPLETED"
+  "last_status": "MERGE_COMPLETED",
+  "review": {
+    "status": null,
+    "pr": null
+  }
 }
 ```
+
+`review.status`: `null` (not run yet) → `"pr_open"` (fixes committed, PR riding the merge wave) → `"done"` (review clean, or review PR merged). Older state files without the `review` key: treat as `null`.
 
 ## `PROGRESS.md` shape (human-readable)
 
@@ -283,11 +296,12 @@ cc-afk <goal>
 /afk-pipeline (this command, per-turn playbook)
   ├─ Step 1: hydrate state from .host-orchestrator/pipelines/<slug>.state.json
   ├─ Step 2: inspect goal scope (gh issue list / pr list)
-  ├─ Step 3: pick ONE next action (merge if any MERGE_READY, else implement if any IMPLEMENTABLE, else report blocker, else declare done)
+  ├─ Step 3: pick ONE next action (merge if any MERGE_READY, else implement if any IMPLEMENTABLE, else review wave if all issues done but review pending, else report blocker, else declare done)
   ├─ Step 4: update PROGRESS.md + state.json
   └─ Step 5: end turn
 
 (Each turn delegates the actual work to:)
   /parallel-implement-wave OR /sandcastle-dispatch-wave   ← implement
   /merge-orchestrate       OR /sandcastle-merge-wave      ← merge
+  /review-fleet (engineering-workflow)                    ← final review
 ```

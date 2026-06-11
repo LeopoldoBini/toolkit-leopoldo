@@ -1,12 +1,17 @@
 ---
 name: review-fleet
-description: Multi-agent review pipeline — parallel reviewers per module/area (deep-modules lens + critical implementation review), a judge that rules each finding applicable or not, and applier subagents on the best available model that fix what was approved. Use when the user asks for a full review fleet, "review fleet", "revisión profunda", "manda los revisores", "revisá todo con subagentes", or wants findings reviewed AND applied in one pass.
+description: Multi-agent review — parallel reviewers per module/area (deep-modules lens + critical implementation review) and a judge that rules each finding applicable or not. Default is REPORT-ONLY (no code changes); with --apply, applier subagents on the best available model also fix what the judge approved. Use when the user asks for a review fleet, "review fleet", "revisión profunda", "manda los revisores", "revisá todo con subagentes".
 disable-model-invocation: true
 ---
 
 # Review Fleet
 
-Run a **reviewers → judge → appliers** pipeline over a scope, using parallel subagents. Reviewers only read; a judge decides what is actually worth fixing; appliers (best available model) apply only the approved corrections. Nothing gets applied without passing the judge.
+Run a **reviewers → judge** pipeline over a scope, using parallel subagents. Reviewers only read; a judge decides what is actually worth fixing.
+
+Two modes:
+
+- **Default (standalone, report-only)** — reviewers + judge, then a report with verdicts. **No code is modified.** Leo reads the result and decides.
+- **`--apply`** — the full pipeline: after the judge, applier subagents (best available model) fix the approved findings. This mode exists for orchestrated pipelines (e.g. `/afk-pipeline`'s final review wave); only use it interactively if the user explicitly passed `--apply` or asked for fixes to be applied.
 
 ## Phase 0 — Resolve scope
 
@@ -39,9 +44,11 @@ ONE judge subagent (best available model: Fable 5, else Opus) receives ALL findi
 
 The judge does not edit code.
 
-## Phase 3 — Appliers
+## Phase 3 — Appliers (ONLY with `--apply`)
 
-For the APLICAR list only, launch applier subagents on the **best available model** (Fable 5 → Opus → inherit):
+Without `--apply`, SKIP this phase entirely and go to the report — the APLICAR list is delivered as recommendations, not executed.
+
+With `--apply`: for the APLICAR list only, launch applier subagents on the **best available model** (Fable 5 → Opus → inherit):
 
 - Group fixes by file/module cluster; one applier per cluster so they never touch the same files. If clusters can't be isolated, apply serially.
 - When appliers run in parallel over a git repo, use worktree isolation.
@@ -51,15 +58,14 @@ For the APLICAR list only, launch applier subagents on the **best available mode
 
 Single final report:
 
-- **Aplicadas** — finding → fix → verification evidence.
-- **Rechazadas** — finding → judge's one-line reason.
-- **Para Leo (HUMANO)** — finding → what decision is needed.
-- Build/test status after all fixes.
+- **Report-only (default):** **Para aplicar** (finding → proposed fix → judge's reasoning, in application order), **Rechazadas** (finding → one-line reason), **Para Leo (HUMANO)** (finding → what decision is needed).
+- **With `--apply`:** **Aplicadas** (finding → fix → verification evidence), **Rechazadas**, **Para Leo (HUMANO)**, plus build/test status after all fixes.
 
 End with a TL;DR (estado final + pendientes de decisión), per Leo's communication preferences.
 
 ## Invariants
 
-- Reviewers and judge never modify code; only appliers do, and only what the judge approved.
+- Reviewers and judge never modify code. Without `--apply`, NOBODY modifies code — the deliverable is the judged report.
+- With `--apply`, only appliers modify code, and only what the judge approved.
 - If the judge approves nothing, say so plainly — an empty APLICAR list is a valid outcome, not a failure.
 - This skill is explicit-invocation only (expensive: spawns 3+ subagents minimum).

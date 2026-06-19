@@ -1,10 +1,20 @@
 ---
 name: review-fleet
 description: Multi-agent review — parallel reviewers per module/area (deep-modules lens + critical implementation review) and a judge that rules each finding applicable or not. Default is REPORT-ONLY (no code changes); with --apply, applier subagents on the best available model also fix what the judge approved. Use when the user asks for a review fleet, "review fleet", "revisión profunda", "manda los revisores", "revisá todo con subagentes".
-disable-model-invocation: true
 ---
 
 # Review Fleet
+
+## ⛔ Invocation gate — check BEFORE doing anything
+
+Proceed ONLY if one of these holds:
+
+1. The user explicitly invoked this review fleet — they typed `/review-fleet` (or asked in their own words for a review fleet / "revisión profunda" / "mandá los revisores").
+2. You are inside a flow the user already launched that delegates here — specifically `/afk-pipeline`'s final review wave (its playbook says "Invoke `/review-fleet --apply`"), or another orchestration command the user invoked that calls this skill by name.
+
+If you reached this skill any other way — e.g. you finished some work and decided on your own that it "should be reviewed", or a plan/review result made you think a fleet is warranted — **STOP NOW**. Do not spawn reviewers, do not run appliers. Tell Leo what you would run and let HIM invoke it. Rule of this marketplace: orchestration (multi-agent fan-out, appliers that mutate code) is never auto-invoked by the model.
+
+**`--apply` is doubly gated:** only run appliers (which mutate the working tree) when the user explicitly passed `--apply` / asked for fixes to be applied, OR the delegating orchestration flow passed it (the AFK review wave). A bare `/review-fleet` with no `--apply` is REPORT-ONLY.
 
 Run a **reviewers → judge** pipeline over a scope, using parallel subagents. Reviewers only read; a judge decides what is actually worth fixing.
 

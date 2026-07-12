@@ -48,6 +48,16 @@
       "category": "alignment"
     },
     {
+      "name": "interface-lens",
+      "description": "Juzgar, diseñar y construir interfaces con psicología UX + brújula ética (eje ético → persuasivo → oscuro, prueba del arrepentimiento de Nir Eyal, norte time-well-spent). Base de conocimiento: 28 principios en 6 familias (disparadores, acción/fricción, recompensa, inversión, claridad, ética) organizados como bucle disparador→acción→recompensa→inversión, más taxonomía operativa de dark patterns con señales de código por patrón. Tres skills de invocación explícita: /ui-judge audita screenshot/URL/código con hallazgos anclados a evidencia concreta (elemento/cita/archivo:línea — nunca heurísticas genéricas), score por familia con veto ético, y sección obligatoria de límites del input; /ux-design propone flujos declarando qué principio usa cada decisión y por qué sirve al usuario, con guardas éticas y salida simétrica a la entrada; /dark-pattern-scan escanea flujos completos pre-ship (suscripción, checkout, consentimiento) midiendo asimetría de fricción entrada/salida, con reporte pasa/falla, banderas regulatorias (FTC click-to-cancel, DSA) e integración opcional con /code-review. Complementa (no solapa) skills de diseño visual tipo ui-ux-pro-max: esto cubre cómo se comporta la interfaz y su ética, no cómo se ve.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Leopoldo Bini"
+      },
+      "source": "./plugins/interface-lens",
+      "category": "design"
+    },
+    {
       "name": "memory-flow",
       "description": "CLAUDE.md + MEMORY.md flow: /revisar_memoria audita y detecta entradas para graduar; /actualizar_memoria implementa las recomendaciones. Incluye agent claude-memory-auditor para auditorías exhaustivas. Alineado con la política de 3 artefactos (CLAUDE.md = arquitectura, MEMORY.md = aprendizajes sesionales, CONTEXT.md = vocabulario de dominio).",
       "version": "1.0.0",

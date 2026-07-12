@@ -1,0 +1,9 @@
+{
+  "name": "interface-lens",
+  "version": "1.0.0",
+  "description": "Juzgar, diseñar y construir interfaces con psicología UX + brújula ética. Tres skills: /ui-judge (audita screenshot/URL/código contra 28 principios en 6 familias), /ux-design (propone flujos declarando principios y guardas éticas), /dark-pattern-scan (caza patrones oscuros en flujos y código antes de shippear). Base: bucle disparador→acción→recompensa→inversión + eje ético + prueba del arrepentimiento.",
+  "author": {
+    "name": "Leopoldo Bini",
+    "email": "raul.leopoldobini@gmail.com"
+  }
+}

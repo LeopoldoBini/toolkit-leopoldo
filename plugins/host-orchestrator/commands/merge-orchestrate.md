@@ -1,6 +1,6 @@
 ---
 name: merge-orchestrate
-description: Serial intent-aware merge of N open PRs in the current repo. Host-only (no Docker). Per PR: gathers intent (issue brief → PR body → commits → diff), computes topological order from `Blocked by` deps + file-overlap risk pairs, refreshes base, `gh pr update-branch`, ephemeral worktree, cascade validation, dispatches `merge-resolver` Opus subagent that enforces 5 no-regression criteria and emits `<action>MERGE|HOLD|ABORT</action>`. Host executes (squash --delete-branch default). Usage `/merge-orchestrate` (auto-discover) or `/merge-orchestrate #5,#7,#9` (explicit). Flags `--strategy=merge|rebase`, `--step`, `--dry-run`.
+description: Serial intent-aware merge of N open PRs in the current repo. Host-only. Per PR: gathers intent (issue brief → PR body → commits → diff), computes topological order from `Blocked by` deps + file-overlap risk pairs, refreshes base, `gh pr update-branch`, ephemeral worktree, cascade validation, dispatches `merge-resolver` Opus subagent that enforces 5 no-regression criteria and emits `<action>MERGE|HOLD|ABORT</action>`. Host executes (squash --delete-branch default). Usage `/merge-orchestrate` (auto-discover) or `/merge-orchestrate #5,#7,#9` (explicit). Flags `--strategy=merge|rebase`, `--step`, `--dry-run`.
 ---
 
 # /merge-orchestrate
@@ -14,15 +14,15 @@ Proceed ONLY if one of these holds:
 
 If you reached this command any other way — e.g. you decided on your own that some open PRs "should be merged now" — **STOP NOW**. Do not merge anything. Tell Leo what you would run and let HIM invoke it. Rule of this marketplace: orchestration commands are never auto-invoked by the model.
 
-Self-contained command. Orchestrates a serial, intent-aware merge of N open GitHub PRs entirely on host — no Docker, no Sandcastle SDK, no external CI. Uses the `merge-resolver` custom subagent (Opus) per PR for intent verification and conflict resolution, with the host as the single point of git mutation.
+Self-contained command. Orchestrates a serial, intent-aware merge of N open GitHub PRs entirely on host — no external CI. Uses the `merge-resolver` custom subagent (Opus) per PR for intent verification and conflict resolution, with the host as the single point of git mutation.
 
 **When to use:**
 - 2-7 open PRs you want merged in correct order without manually rebasing each.
 - Mixed AFK + human PRs that touch related code (intent-aware resolution matters).
 
 **When NOT to use:**
-- 8+ PRs and you want parallelism → `/sandcastle-merge-wave` (Docker).
-- PRs not yet reviewed → review first (manually or via sandcastle-merge-wave Step 1).
+- 8+ PRs → split into batches of ≤7, ordered by the dependency graph.
+- PRs not yet reviewed → review first (`/review-fleet` or manually).
 - Single PR → `gh pr merge --squash` directly.
 
 ## Arguments
@@ -230,8 +230,8 @@ In `$WT`:
 ```bash
 cd "$WT"
 
-if [ -x scripts/sandcastle-validate.sh ]; then
-  ./scripts/sandcastle-validate.sh "$PR" 2>&1 | tee /tmp/mo-validate-$PR.log
+if [ -x scripts/wave-validate.sh ]; then
+  ./scripts/wave-validate.sh "$PR" 2>&1 | tee /tmp/mo-validate-$PR.log
   validate_exit=$?
 else
   if   [ -f bun.lockb ] || [ -f bun.lock ]; then PM=bun
@@ -395,10 +395,7 @@ If everything merged clean, omit "Bloqueados".
 
 ---
 
-## When to choose `/merge-orchestrate` vs `/sandcastle-merge-wave`
-
-- **`/merge-orchestrate`** (this) — host-only, no Docker, serial, 2-7 PRs, fast to start, context window grows as wave runs.
-- **`/sandcastle-merge-wave`** — Docker AFK, parallel reviewers, 8+ PRs, slower start (image build, container boot), context window stays clean.
+## Tip
 
 Start with `/merge-orchestrate --dry-run` to see the planned order without executing anything.
 
@@ -406,8 +403,8 @@ Start with `/merge-orchestrate --dry-run` to see the planned order without execu
 
 ## What this command does NOT do
 
-- **No review judgment**: assumes PRs are reviewed. For APPROVE/HOLD/BLOCK review, use sandcastle-merge-wave Step 1 or Matt Pocock's `/review`.
-- **No PR creation, no branch creation**: only operates on already-open PRs. For PR creation use `/parallel-implement-wave` (same plugin) or `/sandcastle-dispatch-wave`.
+- **No review judgment**: assumes PRs are reviewed. For a review pass, use `/review-fleet` (engineering-workflow) or `/review`.
+- **No PR creation, no branch creation**: only operates on already-open PRs. For PR creation use `/parallel-implement-wave` (same plugin).
 - **No remote infrastructure**: no GH Actions, no service dependencies.
-- **No parallelism**: serial by design. For parallel review of large batches use sandcastle-merge-wave.
+- **No parallelism**: serial by design.
 - **No checkpoint recovery**: state lives in GitHub itself (closed PRs stay closed); re-invoking is idempotent.

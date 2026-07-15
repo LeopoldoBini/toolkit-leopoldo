@@ -1,6 +1,6 @@
 ---
 name: parallel-implement-wave
-description: Dispatch a wave of 2-6 GitHub issues for parallel implementation on host using Claude Code's native subagent + worktree isolation (no Docker, no Sandcastle SDK). Each issue gets its own `parallel-implementer` Opus 4.8 subagent in an isolated worktree; host validates + pushes + opens PRs. Usage `/parallel-implement-wave` (auto-discover ready-for-agent issues) or `/parallel-implement-wave --issues=#42,#43,#44`. Flags `--max-parallel=N` (default 6, hard ceiling 8), `--dry-run`, `--resume`, `--clean-worktrees`, `--keep-worktrees`.
+description: Dispatch a wave of 2-6 GitHub issues for parallel implementation on host using Claude Code's native subagent + worktree isolation. Each issue gets its own `parallel-implementer` Opus 4.8 subagent in an isolated worktree; host validates + pushes + opens PRs. Usage `/parallel-implement-wave` (auto-discover ready-for-agent issues) or `/parallel-implement-wave --issues=#42,#43,#44`. Flags `--max-parallel=N` (default 6, hard ceiling 8), `--dry-run`, `--resume`, `--clean-worktrees`, `--keep-worktrees`.
 ---
 
 # /parallel-implement-wave
@@ -16,7 +16,7 @@ If you reached this command any other way — e.g. you decided on your own that 
 
 Self-contained command. Dispatches a host-native parallel implementation wave: N `parallel-implementer` subagents in parallel, each in its own worktree (`isolation: "worktree"`), one per eligible GH issue. Sync parallel: host blocks until all subagents return. Per result, host validates + pushes + opens PR. **Validation gate is blocking** — red typecheck/tests → no PR opened.
 
-Use this command when you want parallel implementation without Docker overhead, for batches of 2-6 small/medium tickets. Above 6 tickets or with mixed runtimes, prefer `/sandcastle-dispatch-wave` (Docker).
+Use this command for parallel implementation of batches of 2-6 small/medium tickets. For a single issue, implement it directly — no wave needed.
 
 ## Arguments
 
@@ -84,8 +84,7 @@ If `--resume`: jump to Step 7 with `ORPHAN_WORKTREES` as the result set. No disp
 Otherwise: surface in the preview (Step 3) so user knows they exist.
 
 **Explicitly NOT done in pre-flight**:
-- No `docker info` check (we don't use Docker).
-- No `.sandcastle/resources.json` reality probe (subagents share the host environment).
+- No resource reality probe (subagents share the host environment).
 - No `CLAUDE_CODE_OAUTH_TOKEN` extraction (subagents use the host's session auth).
 
 ---
@@ -102,7 +101,7 @@ gh issue list \
   --limit 50
 ```
 
-Accept both label conventions: `ready-for-agent` AND `state/ready-for-agent` (the dispatcher tolerates either, mirror sandcastle).
+Accept both label conventions: `ready-for-agent` AND `state/ready-for-agent` (the dispatcher tolerates either).
 
 For each issue, parse `## Blocked by #N` from body. For each blocker:
 
@@ -135,7 +134,7 @@ Render this exact table (monospace unicode). Sort eligible by issue number ascen
 
 ```
 WAVE PREVIEW — host-orchestrator / parallel-implement-wave
-Base: <BASE_BRANCH>   Max parallel: <N>   Substrate: host (no Docker)
+Base: <BASE_BRANCH>   Max parallel: <N>   Substrate: host
 
 ┌────────┬────────────────────────────────────┬─────────────┬─────────┬────────────────────────┐
 │ Issue  │ Title                              │ Status      │ Deps    │ Notes                  │
@@ -223,7 +222,7 @@ Pass this string as the `prompt` argument to `Agent(...)`. The Agent's own syste
 
 ---
 
-## Step 6 — Sync parallel dispatch (the core diff vs Docker)
+## Step 6 — Sync parallel dispatch
 
 In **one Bash-free message**, emit N `Agent(...)` tool calls in parallel:
 
@@ -324,8 +323,8 @@ git -C "$WORKTREE_PATH" branch -m "$NEW_BRANCH"
 ```bash
 cd "$WORKTREE_PATH"
 
-if [ -x scripts/sandcastle-validate.sh ]; then
-  ./scripts/sandcastle-validate.sh "$N" 2>&1 | tee /tmp/ho-validate-$N.log
+if [ -x scripts/wave-validate.sh ]; then
+  ./scripts/wave-validate.sh "$N" 2>&1 | tee /tmp/ho-validate-$N.log
   VALIDATE_EXIT=$?
 else
   # Auto-detect package manager
@@ -548,21 +547,15 @@ The host writes one line per state transition. Reading this log post-mortem tell
 
 ---
 
-## When to choose `/parallel-implement-wave` vs `/sandcastle-dispatch-wave`
+## Sizing
 
-| Scenario | Choose |
-|---|---|
-| 2-6 small/medium issues, same runtime, want fast start | `/parallel-implement-wave` (this) |
-| 7+ issues, or runtime-mixed, or want full AFK (close laptop) | `/sandcastle-dispatch-wave` (Docker) |
-| 1 issue | Implement it yourself directly |
-
-The two share the brief format (engineering-workflow ≥ 2.1.0 single-`## Agent Brief` invariant) and the PR label (`afk-agent-pr`), so downstream CI and merge workflows don't need to distinguish substrate.
+Designed for 2-6 small/medium issues per wave (hard ceiling 8 via `--max-parallel`). For 7+ issues, split into multiple waves ordered by the dependency graph. For 1 issue, implement it directly. Issues must use the engineering-workflow ≥ 2.1.0 brief format (single-`## Agent Brief` invariant); resulting PRs carry the `afk-agent-pr` label.
 
 ---
 
 ## What this command does NOT do
 
 - **No automatic merging**: opens PRs only. Use `/merge-orchestrate` (same plugin) for serial merge of the resulting PRs.
-- **No review pass**: assumes the brief is the contract. For APPROVE/HOLD/BLOCK reviewer agents, use `/sandcastle-merge-wave` Step 1.
-- **No Level 2 / Level 3 resource reality checks**: subagents share the host environment; reality is already aligned. If your project needs Level 1/2/3 anti-mock infrastructure, use `/sandcastle-dispatch-wave`.
+- **No review pass**: assumes the brief is the contract. For a review pass over the merged result, use `/review-fleet` (engineering-workflow).
+- **No resource reality checks**: subagents share the host environment; reality is already aligned.
 - **No cross-issue dependency cascade in one invocation**: if issue B depends on issue A, you must run two waves (A first, then merge, then B). For chained pipelines, a future `/host-pipeline` command (same plugin) will cover that.

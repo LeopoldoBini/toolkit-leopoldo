@@ -1,6 +1,6 @@
 # host-orchestrator
 
-Host-side orchestrator for the full AFK pipeline (implementation + merge + goal-driven loop) using Claude Code's native primitives — subagents, worktree isolation, and `/goal` with its Haiku verifier. No Docker required (but supported for the heavy phases via `sandcastle-max` delegation).
+Host-side orchestrator for the full AFK pipeline (implementation + merge + goal-driven loop) using Claude Code's native primitives — subagents, worktree isolation, and `/goal` with its Haiku verifier. Everything runs host-native; there is no alternate substrate.
 
 Three slash commands:
 
@@ -101,7 +101,7 @@ For each PR in the wave:
 
 1. Auto-rebase via `gh pr update-branch`.
 2. Ephemeral worktree.
-3. Cascade validation (prefers `scripts/sandcastle-validate.sh` if present; otherwise auto-detect package manager + typecheck + tests).
+3. Cascade validation (prefers `scripts/wave-validate.sh` if present; otherwise auto-detect package manager + typecheck + tests).
 4. Dispatch the `merge-resolver` Opus subagent (`agents/merge-resolver.md`) with the full intent packet (brief / PR body / commits / diff cascade, plus semantic-risk pairs from file overlap analysis).
 5. Subagent emits `<action>MERGE | HOLD | ABORT</action>` + `<resolution>RESOLVED | INCOMPATIBLE | NOT_NEEDED</resolution>`. Host executes the recommendation (squash --delete-branch by default).
 6. On `INCOMPATIBLE`: label `merge-blocked`, comment with resolver summary, skip transitive deps. Auto-pilot otherwise.
@@ -150,10 +150,8 @@ Together they realize the AFK dream: type one command, walk away, come back when
 | Flag | Default | Purpose |
 |---|---|---|
 | `--goal=<spec>` | (required) | Scope: `milestone:<name>`, `label:<label>`, `parent:#N`, or `#42,#43,...` |
-| `--implement=host\|docker` | `docker` | Substrate for implementation waves |
-| `--merge=host\|docker` | `host` | Substrate for merge waves |
 
-Defaults (`docker+host`) reflect the combo Leo has tested as the most reliable: Docker for parallel implementation (isolation), host for serial merge (intent-aware speed).
+Both wave types run host-native: implementation via `/parallel-implement-wave`, merge via `/merge-orchestrate`.
 
 ### State persistence
 
@@ -166,8 +164,8 @@ Every turn writes:
 Inside the playbook, the agent picks the FIRST matching action:
 
 1. **All DONE** → emit goal-completion message, end (verifier closes the loop)
-2. **Any MERGE_READY** → run merge wave (delegates to `/merge-orchestrate` or `/sandcastle-merge-wave`)
-3. **Any IMPLEMENTABLE** → run implement wave (delegates to `/parallel-implement-wave` or `/sandcastle-dispatch-wave`)
+2. **Any MERGE_READY** → run merge wave (delegates to `/merge-orchestrate`)
+3. **Any IMPLEMENTABLE** → run implement wave (delegates to `/parallel-implement-wave`)
 4. **Only blocked-by-dep / human-gated remain** → report blockers, end (verifier sees no progress next turn → halts)
 5. **Some IN_REVIEW (PR open, not mergeable)** → describe blockers (failed checks, branch protection), end
 
@@ -177,8 +175,8 @@ One action per turn. Auto-compact (set by env var) fires at safe boundaries betw
 
 ```
 /afk-pipeline --goal=milestone:Q2-Checkout
-/afk-pipeline --goal=label:slice/checkout --implement=host
-/afk-pipeline --goal=#42,#43,#44,#45 --merge=docker
+/afk-pipeline --goal=label:slice/checkout
+/afk-pipeline --goal=#42,#43,#44,#45
 /afk-pipeline --goal=parent:#100  # all issues with "Part of #100" in body
 ```
 
@@ -216,47 +214,20 @@ cc-afk() {
       "/goal Todas las GH issues que matchean '$goal' están cerradas con su PR mergeado a la base branch (issue closed AND linked PR merged).
 
 Para avanzar en cada turn, ejecutá:
-  /afk-pipeline --goal=\"$goal\" --implement=docker --merge=host
+  /afk-pipeline --goal=\"$goal\"
 
 Mantené PROGRESS.md actualizado en la raíz del repo y .host-orchestrator/pipelines/<slug>.state.json. Una acción productiva por turn, no más."
 }
-
-# Variants (optional):
-cc-afk-host() {
-  local goal="$*"
-  CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000 \
-  CLAUDE_CODE_MAX_TURNS=50 \
-  CLAUDE_CODE_DISABLE_THINKING=1 \
-  CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 \
-  DISABLE_TELEMETRY=1 \
-  API_TIMEOUT_MS=1200000 \
-  BASH_MAX_TIMEOUT_MS=1200000 \
-    claude --dangerously-skip-permissions \
-      "/goal Todas las GH issues que matchean '$goal' están cerradas con su PR mergeado.
-Ejecutá /afk-pipeline --goal=\"$goal\" --implement=host --merge=host"
-}
-
-cc-afk-docker() {
-  local goal="$*"
-  CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000 \
-  CLAUDE_CODE_MAX_TURNS=50 \
-  CLAUDE_CODE_DISABLE_THINKING=1 \
-  CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 \
-  DISABLE_TELEMETRY=1 \
-  API_TIMEOUT_MS=1200000 \
-  BASH_MAX_TIMEOUT_MS=1200000 \
-    claude --dangerously-skip-permissions \
-      "/goal Todas las GH issues que matchean '$goal' están cerradas con su PR mergeado.
-Ejecutá /afk-pipeline --goal=\"$goal\" --implement=docker --merge=docker"
-}
+# Alias por memoria muscular (histórico): mismo comportamiento que cc-afk
+alias cc-afk-host=cc-afk
 ```
 
 ### Usage
 
 ```bash
-cc-afk milestone:Q2-Checkout       # default (docker impl + host merge)
-cc-afk-host label:slice/checkout   # full-host (no Docker required)
-cc-afk-docker "#42,#43,#44"        # full-sandcastle (Docker both phases)
+cc-afk milestone:Q2-Checkout
+cc-afk label:slice/checkout
+cc-afk "#42,#43,#44"
 ```
 
 ### Env vars set by `cc-afk` and why
@@ -286,11 +257,11 @@ Equivalent to `--permission-mode bypassPermissions`. Saltea todos los permission
 Implement                                    Merge
 ─────────                                    ─────
 1 ticket   → Leo directly                    1 PR   → gh pr merge --squash
-2-6 host   → /parallel-implement-wave        2-7 host → /merge-orchestrate
-7+ Docker  → /sandcastle-dispatch-wave       8+ Docker → /sandcastle-merge-wave
+2-6        → /parallel-implement-wave        2-7 → /merge-orchestrate
+7+         → multiple waves (dep order)      8+  → multiple batches (dep order)
 ```
 
-The two `host-orchestrator` commands cover the host column. The two `sandcastle-max` commands cover the Docker column. The two share the same brief format (engineering-workflow's `## Agent Brief` invariant) and the same PR label (`afk-agent-pr`), so downstream consumers don't need to distinguish substrate.
+Both commands share the brief format (engineering-workflow's `## Agent Brief` invariant) and the PR label (`afk-agent-pr`).
 
 ---
 
@@ -322,9 +293,9 @@ No `skills/`. No auto-invocation by phrase. The slash commands are the only entr
 
 ## What this plugin does NOT do
 
-- **No PR review judgment**: assumes briefs are accepted (implement) or PRs are reviewed (merge). For APPROVE/HOLD/BLOCK reviewer agents, use `/sandcastle-merge-wave` Step 1 or Matt Pocock's `/review`.
-- **No remote infrastructure dependency**: doesn't need GitHub Actions, sandcastle-validate-as-a-service, or any external CI. Validation runs in your shell.
-- **No Docker. No Sandcastle SDK. No OAuth token extraction.** Subagents inherit your Claude Code session's auth and your host environment.
+- **No PR review judgment**: assumes briefs are accepted (implement) or PRs are reviewed (merge). For a review pass, use `/review-fleet` (engineering-workflow) or `/review`.
+- **No remote infrastructure dependency**: doesn't need GitHub Actions or any external CI. Validation runs in your shell.
+- **No containers. No OAuth token extraction.** Subagents inherit your Claude Code session's auth and your host environment.
 - **No cross-issue dependency cascade in one invocation**: if issue B depends on issue A, run two waves (A → merge → B). A future `/host-pipeline` command in this same plugin will compose dispatch → CI → merge in a single loop.
 - **No checkpoint JSON**: an append-only audit log (`.host-orchestrator/waves/<TS>.log`) is the state. GitHub state (PRs, labels) is the durable truth; re-invoking is idempotent.
 
@@ -336,24 +307,18 @@ No `skills/`. No auto-invocation by phrase. The slash commands are the only entr
 engineering-workflow:
   /grill-with-docs → /to-prd → /to-issues (label: ready-for-agent + ## Agent Brief)
                                   │
-                  ┌───────────────┴───────────────┐
-                  ▼                               ▼
-        host (small batch)                 Docker (large batch)
-        /parallel-implement-wave         /sandcastle-dispatch-wave
-                  │                               │
-                  ▼                               ▼
-                  ────────────[N open PRs, label afk-agent-pr]──────────
-                  │                               │
-                  ▼                               ▼
-        host (small batch)                 Docker (large batch)
-        /merge-orchestrate          /sandcastle-merge-wave + /sandcastle-pipeline
-                  │                               │
-                  └───────────────┬───────────────┘
                                   ▼
-                            merged to base
+                    /parallel-implement-wave
+                                  │
+                                  ▼
+                 [N open PRs, label afk-agent-pr]
+                                  │
+                                  ▼
+                        /merge-orchestrate
+                                  │
+                                  ▼
+                          merged to base
 ```
-
-Both substrates enforce the same 5 no-regression criteria via similar `merge-resolver` subagent prompts. They differ in execution substrate (host vs Docker), parallelism strategy (sync subagents vs containers), and overhead profile.
 
 ---
 

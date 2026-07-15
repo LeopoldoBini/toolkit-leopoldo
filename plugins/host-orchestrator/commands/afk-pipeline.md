@@ -1,6 +1,6 @@
 ---
 name: afk-pipeline
-description: Thin playbook for goal-driven AFK pipelines. Designed to run inside a `/goal`-wrapped session — Claude Code's native `/goal` handles the verifier loop (Haiku evaluates condition between turns); this command tells the model WHAT to do in each productive turn. Per turn checks current state (open issues / open PRs) and dispatches the next action: implement wave (via `/parallel-implement-wave` host OR `/sandcastle-dispatch-wave` Docker), merge wave (via `/merge-orchestrate` host OR `/sandcastle-merge-wave` Docker), or — once all issues are merged — a final review wave (via `/review-fleet`, engineering-workflow: reviewers → judge → appliers; fixes land as one more PR through the normal merge wave). Maintains PROGRESS.md + state.json for resumability. Defaults `--implement=docker --merge=host` (Leo's tested combo). Usage `/afk-pipeline --goal=<spec>`. Flags `--implement=host\|docker`, `--merge=host\|docker`.
+description: Thin playbook for goal-driven AFK pipelines. Designed to run inside a `/goal`-wrapped session — Claude Code's native `/goal` handles the verifier loop (Haiku evaluates condition between turns); this command tells the model WHAT to do in each productive turn. Per turn checks current state (open issues / open PRs) and dispatches the next action: implement wave (via `/parallel-implement-wave`), merge wave (via `/merge-orchestrate`), or — once all issues are merged — a final review wave (via `/review-fleet`, engineering-workflow: reviewers → judge → appliers; fixes land as one more PR through the normal merge wave). Everything runs host-native (subagents + worktrees). Maintains PROGRESS.md + state.json for resumability. Usage `/afk-pipeline --goal=<spec>`.
 ---
 
 # /afk-pipeline
@@ -30,16 +30,12 @@ This separation matters: this command **does not loop internally**. One invocati
   - `parent:#<N>` — all issues with `Part of #N` in their body
   - `#42,#43,#44` — explicit issue list
 
-- **`--implement=host|docker`** (default `docker`) — substrate for implementation waves.
-- **`--merge=host|docker`** (default `host`) — substrate for merge waves.
-
-The defaults match Leo's tested combo (Docker implement + host merge). Override per invocation if needed.
+Both waves run **host-native** (subagents + worktree isolation): implementation via `/parallel-implement-wave`, merge via `/merge-orchestrate`. There is no alternate substrate.
 
 ## Pre-conditions (all enforced by the slash commands this delegates to)
 
 - `gh` authed (`gh auth status`).
 - Git repo with base branch tracking a remote.
-- For `--implement=docker` or `--merge=docker`: `sandcastle-max` plugin installed + `.sandcastle/` scaffolded (`/sandcastle-init` ran once).
 - Issues use engineering-workflow ≥ 2.1.0 brief format (`## Agent Brief` single-comment invariant).
 
 If any precondition fails, **emit a "BLOCKED — needs human" message in this turn**. The `/goal` verifier will see no progress; you'll need to fix the precondition and re-launch.
@@ -70,8 +66,8 @@ mkdir -p .host-orchestrator/pipelines
     ```json
     {
       "goal_spec": "$GOAL_SPEC",
-      "implement_substrate": "$IMPLEMENT",
-      "merge_substrate": "$MERGE",
+      "implement_substrate": "host",
+      "merge_substrate": "host",
       "started_at": "<ISO>",
       "issues_total": <N>,
       "issues_closed": <K>,
@@ -84,8 +80,7 @@ mkdir -p .host-orchestrator/pipelines
     ```markdown
     # AFK Pipeline — Goal: $GOAL_SPEC
     Started: <ISO>
-    Implement substrate: $IMPLEMENT
-    Merge substrate: $MERGE
+    Substrate: host (implement + merge)
 
     ## Issues in scope (<N>)
     - [ ] #42 — Add payment provider abstraction
@@ -130,14 +125,12 @@ Priority cascade (first match wins):
    - Findings ruled HUMANO go to PROGRESS.md under "Decisiones / constraints" — they do NOT block goal completion.
 
 2. **Any MERGE_READY** → run a merge wave on them:
-   - If `--merge=host` → invoke `/merge-orchestrate` with the explicit PR list.
-   - If `--merge=docker` → invoke `/sandcastle-merge-wave` (Docker).
+   - Invoke `/merge-orchestrate` with the explicit PR list.
    - If the review PR (`review.pr`) was among the merged → set `review.status = "done"`.
    - After: re-read state, append phase to `phases_history`, update `PROGRESS.md`. End turn.
 
 3. **Any IMPLEMENTABLE** → run an implementation wave on them (cap by `--max-parallel` of the underlying command):
-   - If `--implement=host` → invoke `/parallel-implement-wave --issues=<list>`.
-   - If `--implement=docker` → invoke `/sandcastle-dispatch-wave` (Docker).
+   - Invoke `/parallel-implement-wave --issues=<list>`.
    - After: re-read state, append phase, update `PROGRESS.md`. End turn.
 
 4. **Only BLOCKED_BY_DEP / HUMAN_GATED remain (nothing else actionable)** → emit a clear BLOCKED message naming each blocker + what human action is needed. End turn.
@@ -188,7 +181,7 @@ Leo decides whether to compact manually. You cannot trigger `/compact` yourself;
 ```json
 {
   "goal_spec": "milestone:Q2-Checkout",
-  "implement_substrate": "docker",
+  "implement_substrate": "host",
   "merge_substrate": "host",
   "started_at": "2026-05-22T14:00:00Z",
   "issues_total": 8,
@@ -198,7 +191,7 @@ Leo decides whether to compact manually. You cannot trigger `/compact` yourself;
       "phase_id": "phase-001",
       "started_at": "2026-05-22T14:00:00Z",
       "action": "dispatch",
-      "substrate": "docker",
+      "substrate": "host",
       "issues": [42, 43, 44],
       "outcome": "3 PRs opened (#56, #57, #58)",
       "completed_at": "2026-05-22T14:12:30Z"
@@ -229,8 +222,7 @@ Leo decides whether to compact manually. You cannot trigger `/compact` yourself;
 ```markdown
 # AFK Pipeline — Goal: milestone:Q2-Checkout
 Started: 2026-05-22T14:00Z
-Implement substrate: docker
-Merge substrate: host
+Substrate: host (implement + merge)
 
 ## Issues in scope (8)
 - [x] #42 — Add payment provider abstraction (merged PR #56)
@@ -243,7 +235,7 @@ Merge substrate: host
 - [ ] #49 — Refund endpoint
 
 ## Phases history
-- phase-001 (14:00 → 14:12): dispatch docker → 3 PRs opened (#42, #43, #44 → #56, #57, #58)
+- phase-001 (14:00 → 14:12): dispatch host → 3 PRs opened (#42, #43, #44 → #56, #57, #58)
 - phase-002 (14:15 → 14:18): merge host → 3 PRs merged
 - phase-003 (14:20 → in progress): dispatching #45, #46, #47
 
@@ -260,7 +252,7 @@ Merge substrate: host
 - **No auto-`/compact`** — the env var `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (set by `cc-afk` alias) handles this. Compact fires at safe boundaries (between turns), never mid-tool.
 - **No goal verification** — `/goal` does this with Haiku. You just check state per turn and act.
 - **No retries on a single turn** — if a dispatch / merge fails, the turn ends. Next turn the verifier sees the state and the playbook re-evaluates (probably finding the same actions retryable, or surfacing the blocker).
-- **No new orchestration substrate** — this command **delegates** to existing commands (`/parallel-implement-wave`, `/sandcastle-dispatch-wave`, `/merge-orchestrate`, `/sandcastle-merge-wave`). All the heavy lifting lives there.
+- **No new orchestration substrate** — this command **delegates** to existing commands (`/parallel-implement-wave`, `/merge-orchestrate`). All the heavy lifting lives there.
 
 ## How to invoke (typical)
 
@@ -273,7 +265,7 @@ cc-afk milestone:Q2-Checkout
 This sets env vars (auto-compact 180K, max 50 turns, disable thinking, etc.), launches `claude --dangerously-skip-permissions` with an initial prompt that:
 
 1. Invokes `/goal "todas las issues que matchean '<spec>' están cerradas con su PR mergeado"`.
-2. Tells the agent to advance via `/afk-pipeline --goal=<spec> --implement=docker --merge=host`.
+2. Tells the agent to advance via `/afk-pipeline --goal=<spec>`.
 
 You can also invoke this command interactively in any session:
 
@@ -305,7 +297,7 @@ cc-afk <goal>
   └─ Step 5: end turn
 
 (Each turn delegates the actual work to:)
-  /parallel-implement-wave OR /sandcastle-dispatch-wave   ← implement
-  /merge-orchestrate       OR /sandcastle-merge-wave      ← merge
-  /review-fleet (engineering-workflow)                    ← final review
+  /parallel-implement-wave              ← implement
+  /merge-orchestrate                    ← merge
+  /review-fleet (engineering-workflow)  ← final review
 ```

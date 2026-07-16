@@ -60,6 +60,8 @@ Script JS (determinístico, corre en background):
 
 **Regla dura:** ningún `agent()` sin `model:` explícito. La lección del host-en-Sonnet muere acá: el "host" ahora es código, no tiene modelo.
 
+**Quién elige el tier (decisión de Leo, grilling 2026-07-16):** la tabla de arriba es el default, no dogma. El orquestador que diseña/lanza la corrida (sesión en **Fable 5**) ajusta el modelo de cada nodo en tiempo de diseño bajo el principio de **modelo mínimo suficiente** — el tier más barato que cumple la vara de correctitud del nodo; escalar solo donde el error es caro o irreversible. Doble objetivo explícito: máxima correctitud Y eficiencia de tokens (junto con el tope de presupuesto de §6.5). La elección queda pinneada en el script; en runtime nadie re-decide.
+
 ### 3.2 Doctrina "host owns all mutations" → etapa serializadora
 
 El script no tiene FS/git. La doctrina se re-expresa: **toda mutación remota corre en agentes `serializer` despachados secuencialmente por el script** (`await` uno por uno — el orden lo garantiza el código, no la disciplina del modelo). Los implementers siguen sin poder pushear (constraint triple-declarado en su prompt, como hoy).

@@ -18,7 +18,7 @@ El motor v3 funciona, pero sus reglas viven en prosa que el modelo *interpreta* 
 
 ## 2. Decisiones ya tomadas (constraints — no re-litigar)
 
-1. **Política de rama por milestone, siempre:** el pipeline crea `prd/<milestone>` al arrancar; los PRs de las issues apuntan a esa rama; al final queda UN PR `prd/X → master` para el botón verde de Leo. Master siempre deployable. Refresh por tanda (antes de cada wave, traer lo nuevo de master). PRDs en paralelo solo si Leo decide que no se pisan.
+1. **Política de rama por milestone, siempre:** el pipeline crea `prd/<milestone>` al arrancar; los PRs de las issues apuntan a esa rama; al final queda UN PR `prd/X → base` para el botón verde de Leo. La base siempre deployable. Refresh por tanda (antes de cada wave, traer lo nuevo de la base). PRDs en paralelo solo si Leo decide que no se pisan. («base» = `base_branch` del config; en SaltaCompra, `master`.)
 2. **Las issues de GitHub se quedan** como backlog durable e input (`milestone:X`): briefs `## Agent Brief`, deps `Blocked by`, trazabilidad issue→PR. Cambia el motor, no el contrato.
 3. **Motor genérico en el plugin + contrato fino por repo** (hook de validación, base branch, runtime). Ambición: publicable.
 4. **Roadmap:** PRD-0017 cierra con motor v3 → Piloto 1 = ratchet TS (App.SaltaCompra) → construir v4 → Piloto 2 = PRD-0016 supervisado.
@@ -38,29 +38,36 @@ Comando (markdown, delgado):
 Script JS (determinístico, corre en background):
    Fase 0  Setup        agente serializador: crea/actualiza rama prd/X, baseline
    Loop    Waves        while (hay issues accionables && budget.remaining()):
-     0.    Scout        agente Haiku: estado issues/PRs → buckets (JSON schema)
-     1.    Refresh      serializador: merge master→prd/X; conflicto → merge-resolver
+     0.    Scout        agente T3: estado issues/PRs → buckets (JSON schema)
+     1.    Refresh      serializador: merge base→prd/X; conflicto → merge-resolver
      2.    Merge wave   por PR MERGE_READY: validar → merge-resolver → merge (serial)
-     3.    Impl wave    fan-out implementers Opus en worktrees (paralelo)
+     3.    Impl wave    fan-out implementers T1 en worktrees (paralelo)
      4.    Gate         CÓDIGO JS: compara métricas del validador vs baseline → if
      5.    Publish      serializador: push + gh pr create por resultado verde (serial)
-   Fase N  Review       review fleet sobre el diff integrado prd/X vs master
-   Fase Z  Cierre       serializador: PR draft prd/X → master + reporte final
+   Fase N  Review       review fleet sobre el diff integrado prd/X vs base
+   Fase Z  Cierre       serializador: PR draft prd/X → base + reporte final
 ```
 
 ### 3.1 Los cuatro roles de agente (tiering pinneado SIEMPRE)
 
-| Rol | Modelo (`opts.model`) | Effort | Hace | NO hace |
+**Vocabulario de tiers (agnóstico a la línea de modelos vigente — DECIDIDO 2026-07-16):** la spec y los scripts hablan en tiers de capacidad, nunca en nombres de modelos. El mapeo tier→modelo vive en UN solo lugar (`model_map` del config, §3.10, con defaults del plugin): cambia la línea de modelos → se edita el mapeo, no la spec ni los scripts.
+
+- **T0 — orquestador:** máxima capacidad disponible. Diseña la corrida y asigna tiers por nodo.
+- **T1 — razonador:** máxima capacidad delegable. Nodos donde el error es caro o irreversible.
+- **T2 — operativo:** equilibrio capacidad/costo. Trabajo delicado pero rutinario.
+- **T3 — económico:** mínimo costo. Trabajo mecánico y verificable.
+
+| Rol | Tier | Effort | Hace | NO hace |
 |---|---|---|---|---|
-| **scout** | `haiku` | low | `gh issue/pr list --json` → buckets estructurados | juicio, mutación |
-| **implementer** | `opus` | (sesión) | TDD + vertical slice en su worktree (disciplina actual de `parallel-implementer.md`) | push, `gh pr *`, salir del worktree |
-| **validator** | `haiku` o `sonnet` | low | ejecuta `wave-validate.sh --json` (o autodetect) y reporta NÚMEROS via schema | decidir si pasa — eso es del script |
-| **serializer** (git-officer) | `sonnet` | medium | TODA mutación remota: push, `gh pr create/merge`, branch ops. Idempotente (check-then-act) | implementar, juzgar código |
-| **merge-resolver** | `opus` | high | resolver conflictos con intent packet; 5 criterios de no-regresión (sin cambios vs v3) | mergear él mismo (reporta; el serializer ejecuta) |
+| **scout** | T3 | low | `gh issue/pr list --json` → buckets estructurados | juicio, mutación |
+| **implementer** | T1 (T2 en tandas triviales) | (sesión) | TDD + vertical slice en su worktree (disciplina actual de `parallel-implementer.md`) | push, `gh pr *`, salir del worktree |
+| **validator** | T3 | low | ejecuta `wave-validate.sh --json` (o autodetect) y reporta NÚMEROS via schema | decidir si pasa — eso es del script |
+| **serializer** (git-officer) | T2 | medium | TODA mutación remota: push, `gh pr create/merge`, branch ops. Idempotente (check-then-act) | implementar, juzgar código |
+| **merge-resolver** | T1 | high | resolver conflictos con intent packet; 5 criterios de no-regresión (sin cambios vs v3) | mergear él mismo (reporta; el serializer ejecuta) |
 
-**Regla dura:** ningún `agent()` sin `model:` explícito. La lección del host-en-Sonnet muere acá: el "host" ahora es código, no tiene modelo.
+**Regla dura:** ningún `agent()` sin modelo explícito (resuelto desde el tier via `model_map`). La lección del host-sin-pinnear muere acá: el "host" ahora es código, no tiene modelo.
 
-**Quién elige el tier (decisión de Leo, grilling 2026-07-16):** la tabla de arriba es el default, no dogma. El orquestador que diseña/lanza la corrida (sesión en **Fable 5**) ajusta el modelo de cada nodo en tiempo de diseño bajo el principio de **modelo mínimo suficiente** — el tier más barato que cumple la vara de correctitud del nodo; escalar solo donde el error es caro o irreversible. Doble objetivo explícito: máxima correctitud Y eficiencia de tokens (junto con el tope de presupuesto de §6.5). La elección queda pinneada en el script; en runtime nadie re-decide.
+**Quién elige el tier (decisión de Leo, grilling 2026-07-16):** la tabla de arriba es el default, no dogma. El orquestador que diseña/lanza la corrida (sesión en **T0**) ajusta el tier de cada nodo en tiempo de diseño bajo el principio de **modelo mínimo suficiente** — el tier más barato que cumple la vara de correctitud del nodo; escalar solo donde el error es caro o irreversible. Doble objetivo explícito: máxima correctitud Y eficiencia de tokens (junto con el tope de presupuesto de §6.5). La elección queda pinneada en el script; en runtime nadie re-decide.
 
 ### 3.2 Doctrina "host owns all mutations" → etapa serializadora
 
@@ -68,7 +75,7 @@ El script no tiene FS/git. La doctrina se re-expresa: **toda mutación remota co
 
 Cada mutación es **check-then-act** (idempotente): antes de `gh pr create`, verificar si ya existe PR para esa branch; antes de merge, verificar si ya está mergeado. Esto hace el replay del resume seguro (§3.5).
 
-**Dos PRDs en paralelo no se pisan por diseño:** cada workflow solo muta su rama `prd/X` y las branches de sus issues; master solo se *lee* (fetch en el refresh); el único write a master es el botón verde manual de Leo. Punto de contacto restante: labels de issues — disjuntos por milestone.
+**Dos PRDs en paralelo no se pisan por diseño:** cada workflow solo muta su rama `prd/X` y las branches de sus issues; la base solo se *lee* (fetch en el refresh); el único write a la base es el botón verde manual de Leo. Punto de contacto restante: labels de issues — disjuntos por milestone.
 
 ### 3.3 El gate como código: ratchet de no-regresión formalizado
 
@@ -76,18 +83,20 @@ Semántica exacta (formaliza `lesson_gate_wave_es_ratchet_no_regresion`):
 
 ```
 PASA ⇔  tests_propios == verde                      (los tests del slice, todos)
-     ∧  ts_errors_nuevos == 0                        (errores TS ≤ baseline, sin nuevos)
+     ∧  ∀ métrica m: valor(m) ≤ baseline(m)          (ratchet genérico: ninguna métrica empeora)
      ∧  tests_rotos ⊆ baseline.tests_rotos           (ningún test antes-verde ahora rojo)
 ```
 
+**Métricas ratchet (agnóstico al stack — 2026-07-16):** el hook del repo declara sus métricas numéricas con convención "menor es mejor" (en un repo TS la métrica canónica es `ts_errors`; en otro stack podría ser `lint_errors`, `mypy_errors`, etc.). El motor no conoce ningún stack: solo compara números contra el baseline.
+
 - **Tests propios (DECIDIDO en grilling 2026-07-16, opción B):** `tests_propios` = tests en archivos de test tocados por el diff del PR, derivado mecánicamente de `git diff --name-only` + `test_globs` del config (default por runtime). El gate exige además que el diff agregue ≥ 1 test nuevo (anti "slice sin tests"). El auto-reporte del implementer va al audit log pero NUNCA participa del `if`. Ajuste para slices que solo modifican tests existentes: el requisito "≥ 1 test nuevo" se relaja a "≥ 1 test agregado O modificado".
-- **Baseline:** se captura UNA vez por wave, sobre `prd/X` recién refrescada (Fase 1), corriendo el mismo validador. `{ts_errors: N, failing_tests: [nombres]}`.
-- **Contrato del hook:** `scripts/wave-validate.sh --json` emite `{"ts_errors": N, "tests": {"failed": M, "failed_names": [...]}}`. Sin hook → el validator autodetecta (PM + typecheck + test) y reporta los mismos campos en su schema de salida.
+- **Baseline:** se captura UNA vez por wave, sobre `prd/X` recién refrescada (Fase 1), corriendo el mismo validador. `{metrics: {<nombre>: N, ...}, failing_tests: [nombres]}`.
+- **Contrato del hook:** `scripts/wave-validate.sh --json` emite `{"metrics": {"ts_errors": N, ...}, "tests": {"failed": M, "failed_names": [...]}}`. Sin hook → el validator autodetecta el stack (default JS: package manager + typecheck + test; `metrics.ts_errors`) y reporta el mismo contrato en su schema de salida.
 - **La comparación es un `if` en JS.** El validator reporta números; jamás opina. Rojo → no PR, worktree conservado, label + comment en la issue (via serializer), igual que hoy.
 
 ### 3.4 Estado: GitHub única fuente de verdad + journal para resume
 
-- **Se elimina `state.json`** como fuente de verdad. El scout deriva el estado real de GitHub al inicio de cada wave (barato: Haiku + `gh --json`).
+- **Se elimina `state.json`** como fuente de verdad. El scout deriva el estado real de GitHub al inicio de cada wave (barato: T3 + `gh --json`).
 - **El journal del Workflow** (`journal.jsonl`) es el mecanismo de resume — no es estado de dominio, es cache de ejecución.
 - **`PROGRESS.md` se elimina** (existía para sobrevivir compacts; el script no compacta). La narrativa humana ahora es `log()` + la ventana `/workflows` + el reporte final.
 - **El audit log `.host-orchestrator/waves/<TS>.log` SE CONSERVA** (append-only, lo escribe el serializer en cada mutación). Es el post-mortem en disco, independiente del journal de la sesión.
@@ -103,12 +112,12 @@ Restricción heredada: sin `Date.now()` en el script → timestamps entran por `
 ### 3.6 Refresh de la rama milestone
 
 - **Merge, no rebase** — `prd/X` es compartida (PRs de issues le apuntan); rebase reescribiría historia bajo PRs abiertos.
-- Antes de cada wave: serializer hace `git fetch && git merge origin/master` en `prd/X`.
-- **Conflicto** → despachar `merge-resolver` (Opus, intent packet = qué trae master vs qué lleva la rama). Si resuelve → serializer commitea y pushea. Si `INCOMPATIBLE` → el workflow **frena esa corrida** con estado BLOCKED + reporte claro (no intenta heroísmos: conflictos de a cucharadas era el objetivo del refresh frecuente; uno incompatible es señal de que Leo debe mirar).
+- Antes de cada wave: serializer hace `git fetch && git merge origin/<base>` en `prd/X`.
+- **Conflicto** → despachar `merge-resolver` (T1, intent packet = qué trae la base vs qué lleva la rama). Si resuelve → serializer commitea y pushea. Si `INCOMPATIBLE` → el workflow **frena esa corrida** con estado BLOCKED + reporte claro (no intenta heroísmos: conflictos de a cucharadas era el objetivo del refresh frecuente; uno incompatible es señal de que Leo debe mirar).
 
 ### 3.7 Review fleet final
 
-**DECIDIDO (grilling 2026-07-16, opción A):** fase nativa del workflow — reviewers (fan-out por superficie) → judge → appliers, con los prompts de review-fleet PORTADOS a host-orchestrator, sobre el diff integrado `prd/X..master`. Los fixes aprobados van en UN commit/PR `review/<slug>` → `prd/X` que pasa por el mismo gate. Motor autocontenido y publicable; la revisión hereda pinneo de modelos, orden y presupuesto.
+**DECIDIDO (grilling 2026-07-16, opción A):** fase nativa del workflow — reviewers (fan-out por superficie) → judge → appliers, con los prompts de review-fleet PORTADOS a host-orchestrator, sobre el diff integrado `prd/X..base`. Los fixes aprobados van en UN commit/PR `review/<slug>` → `prd/X` que pasa por el mismo gate. Motor autocontenido y publicable; la revisión hereda pinneo de modelos, orden y presupuesto.
 
 Contexto de la decisión: la v4 tiene vocación de **reemplazar el flujo de implementación paralela autónoma completo** — la duplicación de prompts con engineering-workflow es transitoria, no deuda permanente. La versión interactiva de review-fleet sigue existiendo para uso manual.
 
@@ -133,7 +142,10 @@ Contexto de la decisión: la v4 tiene vocación de **reemplazar el flujo de impl
   "validate_hook": "scripts/wave-validate.sh",
   "max_parallel": 6,
   "runtime": "node|bun|...",            // hint para el validator autodetect
-  "model_overrides": {}                 // p.ej. {"implementer": "sonnet"} para repos triviales
+  "test_globs": ["**/*.test.*", "**/*.spec.*"],  // qué es "archivo de test" para el gate (§3.3)
+  "model_map": { "T1": "opus", "T2": "sonnet", "T3": "haiku" },  // ÚNICO lugar nominal a modelos
+  "role_tiers": {},                     // override por rol, p.ej. {"implementer": "T2"} para repos triviales
+  "labels": { "ready": "ready-for-agent", "agent_pr": "afk-agent-pr" }
 }
 scripts/wave-validate.sh            (existente; NUEVO modo --json, ver §3.3)
 ```

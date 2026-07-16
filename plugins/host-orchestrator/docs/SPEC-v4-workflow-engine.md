@@ -52,22 +52,25 @@ Script JS (determinístico, corre en background):
 
 **Vocabulario de tiers (agnóstico a la línea de modelos vigente — DECIDIDO 2026-07-16):** la spec y los scripts hablan en tiers de capacidad, nunca en nombres de modelos. El mapeo tier→modelo vive en UN solo lugar (`model_map` del config, §3.10, con defaults del plugin): cambia la línea de modelos → se edita el mapeo, no la spec ni los scripts.
 
-- **T0 — orquestador:** máxima capacidad disponible. Diseña la corrida y asigna tiers por nodo.
-- **T1 — razonador:** máxima capacidad delegable. Nodos donde el error es caro o irreversible.
-- **T2 — operativo:** equilibrio capacidad/costo. Trabajo delicado pero rutinario.
-- **T3 — económico:** mínimo costo. Trabajo mecánico y verificable.
+- **T0 — frontera:** máxima capacidad disponible. Orquesta (diseña la corrida y asigna tiers) y también es delegable a nodos donde el juicio es el producto (razonar, juzgar).
+- **T1 — razonador:** alta capacidad. Nodos donde el error es caro o irreversible.
+- **T2 — operativo/económico:** equilibrio capacidad/costo. Trabajo delicado pero rutinario, y lo económico no-trivial.
+- **T3 — súper-económico:** mínimo costo. Operaciones quirúrgicas bien definidas, mecánicas y verificables.
 
-| Rol | Tier | Effort | Hace | NO hace |
+**Rangos por rol (brújula, NO asignación — decidido 2026-07-16):** la tabla da el rango razonable de cada rol; el orquestador T0 elige el tier exacto de cada nodo al diseñar la corrida ("con qué armas batallar cada batalla"), según dificultad real de la tanda, criticidad y presupuesto. Declara su asignación al arrancar (header del script + `log()`), y queda pinneada: en runtime nadie re-decide.
+
+| Rol | Rango | Effort | Hace | NO hace |
 |---|---|---|---|---|
-| **scout** | T3 | low | `gh issue/pr list --json` → buckets estructurados | juicio, mutación |
-| **implementer** | T1 (T2 en tandas triviales) | (sesión) | TDD + vertical slice en su worktree (disciplina actual de `parallel-implementer.md`) | push, `gh pr *`, salir del worktree |
-| **validator** | T3 | low | ejecuta `wave-validate.sh --json` (o autodetect) y reporta NÚMEROS via schema | decidir si pasa — eso es del script |
-| **serializer** (git-officer) | T2 | medium | TODA mutación remota: push, `gh pr create/merge`, branch ops. Idempotente (check-then-act) | implementar, juzgar código |
-| **merge-resolver** | T1 | high | resolver conflictos con intent packet; 5 criterios de no-regresión (sin cambios vs v3) | mergear él mismo (reporta; el serializer ejecuta) |
+| **scout** | T2–T3 | low | `gh issue/pr list --json` → buckets estructurados | juicio, mutación |
+| **implementer** | T0–T1 | (sesión) | TDD + vertical slice en su worktree (disciplina actual de `parallel-implementer.md`) | push, `gh pr *`, salir del worktree |
+| **validator** | T2–T3 | low | ejecuta `wave-validate.sh --json` (o autodetect) y reporta NÚMEROS via schema | decidir si pasa — eso es del script |
+| **serializer** (git-officer) | T1–T2 | medium | TODA mutación remota: push, `gh pr create/merge`, branch ops. Idempotente (check-then-act) | implementar, juzgar código |
+| **merge-resolver** | T0–T1 | high | resolver conflictos con intent packet; 5 criterios de no-regresión (sin cambios vs v3) | mergear él mismo (reporta; el serializer ejecuta) |
+| **reviewers/judge** (§3.7) | T0–T1 | high | revisar el diff integrado / fallar cada hallazgo | aplicar (eso es de appliers T1–T2) |
 
 **Regla dura:** ningún `agent()` sin modelo explícito (resuelto desde el tier via `model_map`). La lección del host-sin-pinnear muere acá: el "host" ahora es código, no tiene modelo.
 
-**Quién elige el tier (decisión de Leo, grilling 2026-07-16):** la tabla de arriba es el default, no dogma. El orquestador que diseña/lanza la corrida (sesión en **T0**) ajusta el tier de cada nodo en tiempo de diseño bajo el principio de **modelo mínimo suficiente** — el tier más barato que cumple la vara de correctitud del nodo; escalar solo donde el error es caro o irreversible. Doble objetivo explícito: máxima correctitud Y eficiencia de tokens (junto con el tope de presupuesto de §6.5). La elección queda pinneada en el script; en runtime nadie re-decide.
+**Principio de elección (grilling 2026-07-16): modelo mínimo suficiente.** Dentro del rango del rol, el orquestador elige el tier más barato que cumple la vara de correctitud del nodo; escala solo donde el error es caro o irreversible. Doble objetivo explícito: máxima correctitud Y eficiencia de tokens (junto con el tope de presupuesto de §6.5).
 
 ### 3.2 Doctrina "host owns all mutations" → etapa serializadora
 
@@ -143,7 +146,7 @@ Contexto de la decisión: la v4 tiene vocación de **reemplazar el flujo de impl
   "max_parallel": 6,
   "runtime": "node|bun|...",            // hint para el validator autodetect
   "test_globs": ["**/*.test.*", "**/*.spec.*"],  // qué es "archivo de test" para el gate (§3.3)
-  "model_map": { "T1": "opus", "T2": "sonnet", "T3": "haiku" },  // ÚNICO lugar nominal a modelos
+  "model_map": { "T0": "fable", "T1": "opus", "T2": "sonnet", "T3": "haiku" },  // ÚNICO lugar nominal a modelos
   "role_tiers": {},                     // override por rol, p.ej. {"implementer": "T2"} para repos triviales
   "labels": { "ready": "ready-for-agent", "agent_pr": "afk-agent-pr" }
 }

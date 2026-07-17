@@ -1,16 +1,24 @@
 # host-orchestrator
 
-Host-side orchestrator for the full AFK pipeline (implementation + merge + goal-driven loop) using Claude Code's native primitives — subagents, worktree isolation, and `/goal` with its Haiku verifier. Everything runs host-native; there is no alternate substrate.
+Host-side orchestrator for the full AFK pipeline. **v4: the pipeline engine is a deterministic Workflow script** — rules run as JS code (loops, conditions, numeric gates); agents only implement, measure and resolve. Spec: `docs/SPEC-v4-workflow-engine.md` (grillada + validada por el Piloto 1, jul-2026).
 
 Three slash commands:
 
 | Command | Phase | Mode |
 |---|---|---|
-| `/parallel-implement-wave` | Implementation | Sync parallel, N subagents in own worktrees, 2-6 issues |
-| `/merge-orchestrate` | Merge | Serial, one PR at a time, auto-pilot, 2-7 PRs |
-| `/afk-pipeline` (v2.1.0) | **Pipeline driver** | Per-turn playbook for `/goal`-wrapped sessions |
+| `/prd-pipeline` (v4) | **Pipeline driver** | Deterministic Workflow: waves implement+merge sobre rama integradora, gate como código, review fleet nativa, PR final draft |
+| `/parallel-implement-wave` | Implementation (standalone) | Sync parallel, N subagents in own worktrees, 2-6 issues |
+| `/merge-orchestrate` | Merge (standalone) | Serial, one PR at a time, auto-pilot, 2-7 PRs |
 
-All share the same DNA: native CC primitives, custom subagents (Opus 4.8 for implementation, Opus for merge), host as the **single point of remote mutation** (subagents never push, never `gh pr create`, never `gh pr merge`).
+All share the same DNA: native CC primitives, custom subagents, and a **single serialized point of remote mutation** (implementers never push, never `gh pr create`, never `gh pr merge` — in v4 that point is the *serializer* agent stage, ordered by the script).
+
+## v4 core principles (from the spec)
+
+- **Rules are code.** The pass/fail gate is a pure JS `if` over numbers reported by a validator agent. Zero gate decisions made by a model. Ratchet semantics: no metric worsens vs the wave baseline, no before-green test goes red, the diff must touch tests.
+- **Capability tiers, not model names.** Script and spec speak T0 (frontier) / T1 (reasoner) / T2 (operative) / T3 (ultra-cheap); the tier→model mapping lives ONLY in `model_map` (repo config, default `{T0:fable, T1:opus, T2:sonnet, T3:haiku}`). The launching session is the T0 orchestrator and pins each node's tier at design time — nothing re-decides at runtime.
+- **Integration branch policy.** The pipeline creates `prd/<milestone>` (or `batch/<slug>`), issue PRs target it, base is merged in before every wave (merge, never rebase), and the run ends with ONE draft PR `prd/X → base` for Leo's green button. Base stays deployable.
+- **GitHub is the only source of truth.** No state.json, no PROGRESS.md. The Workflow journal handles resume; the append-only audit log (`.host-orchestrator/waves/*.log`) survives on disk.
+- **Crash-safe by design.** Serializers are idempotent (check-then-act, keyed by work identity — PR/issue — not branch). Resume rule: `resumeFromRunId` only if nothing changed by hand; otherwise a fresh run is always safe.
 
 ## Migration from `merge-orchestrator` v0.1.0
 
@@ -136,118 +144,71 @@ The `merge-resolver` subagent enforces these explicitly. Violation of any → em
 
 ---
 
-## `/afk-pipeline` — goal-driven AFK loop (v2.1.0)
+## `/prd-pipeline` — the v4 engine (Workflow-native)
 
-**Thin per-turn playbook** designed to run **inside a `/goal`-wrapped session** (Claude Code v2.1.139+). The combination gives you a truly autonomous agentic loop:
+One command launches the whole pipeline as a **deterministic background Workflow** (`workflows/prd-pipeline.js`). The session that types it acts as the **T0 orchestrator**: it reads the repo contract, picks each node's tier (within the spec §3.1 ranges, minimum-sufficient-model principle), shows the plan, and launches. Everything else is code.
 
-- **`/goal <condition>`** (native) → Haiku verifier evaluates the condition between turns; if unmet, the harness re-invokes the main agent automatically. You don't write a loop.
-- **`/afk-pipeline --goal=<spec>`** (this plugin) → tells the main agent **what to do per turn**: inspect goal scope, pick the next productive action (merge if any PR ready, implement if any issue ready, report blocker, or declare done), update progress files, end the turn.
+```
+/prd-pipeline milestone:PRD-0016 +800k        # scope + token budget (recommended)
+/prd-pipeline label:slice/checkout +500k
+/prd-pipeline "#42,#43,#44" --dry-run          # plan + args, no launch
+```
 
-Together they realize the AFK dream: type one command, walk away, come back when the goal is reached or a real blocker requires your attention.
+### Engine flow (per run)
 
-### Flags
+```
+Setup     serializer: crea/actualiza rama integradora prd/X (o batch/X) + worktree local
+Wave N    scout T3 → buckets · refresh base→rama (conflicto → merge-resolver)
+          baseline (validator) · merge wave SERIAL (validar → resolver → merge)
+          impl wave PARALELA (parallel-implementer en worktrees) · gate = if(números)
+          publish SERIAL (push + PR hacia la rama integradora)
+Review    partición → reviewers (arch/impl/integración) → judge → applier → gate → merge
+Cierre    PR DRAFT rama → base para el botón verde de Leo + reporte estructurado
+```
 
-| Flag | Default | Purpose |
+Cortes limpios: budget agotado (en boundary de wave, con pendientes reportados), scope bloqueado (todo BLOCKED_BY_DEP/HUMAN_GATED), refresh incompatible. Gate rojo por issue: 1 reintento con los motivos numéricos; segundo rojo → label `agent-blocked` + comment, la wave sigue.
+
+### Agent roles (tiers pinned per run by the T0 session)
+
+| Role | Range | Job |
 |---|---|---|
-| `--goal=<spec>` | (required) | Scope: `milestone:<name>`, `label:<label>`, `parent:#N`, or `#42,#43,...` |
+| scout | T2–T3 | `gh --json` → buckets. Never judges, never mutates. |
+| validator | T2–T3 | Runs `wave-validate.sh --json` (or autodetect) → NUMBERS. `status: ok\|error` — an invalid measurement is never success. |
+| implementer | T0–T1 (T2 mechanical) | `parallel-implementer` discipline in an isolated worktree. Never pushes. |
+| serializer | T1–T2 | ALL remote mutations, sequential, check-then-act, audit-logged. |
+| merge-resolver | T0–T1 | Conflict/intent verdicts (5 no-regression criteria). Recommends; serializer executes. |
+| reviewers/judge/applier | T0–T2 | Native review fleet over the integrated diff. |
 
-Both wave types run host-native: implementation via `/parallel-implement-wave`, merge via `/merge-orchestrate`.
+### Monitoring & resume
 
-### State persistence
+- `/workflows` = live view; the script's `log()` lines tell the whole story (dispatch, gate PASS/FAIL with numbers, PRs, mutations, cuts).
+- Audit log on disk: `.host-orchestrator/waves/<runLabel>.log` (append-only, written by serializers).
+- Crash → `resumeFromRunId` ONLY if nothing changed by hand; otherwise fresh run with the same args (always safe).
 
-Every turn writes:
-- **`.host-orchestrator/pipelines/<slug>.state.json`** — machine-readable phase history
-- **`PROGRESS.md`** — human-readable checklist + decisions + constraints (survives `/compact` because it's on disk, not in context)
+### Repo contract (optional, with defaults)
 
-### Per-turn priority cascade
-
-Inside the playbook, the agent picks the FIRST matching action:
-
-1. **All DONE** → emit goal-completion message, end (verifier closes the loop)
-2. **Any MERGE_READY** → run merge wave (delegates to `/merge-orchestrate`)
-3. **Any IMPLEMENTABLE** → run implement wave (delegates to `/parallel-implement-wave`)
-4. **Only blocked-by-dep / human-gated remain** → report blockers, end (verifier sees no progress next turn → halts)
-5. **Some IN_REVIEW (PR open, not mergeable)** → describe blockers (failed checks, branch protection), end
-
-One action per turn. Auto-compact (set by env var) fires at safe boundaries between turns.
-
-### Examples
-
-```
-/afk-pipeline --goal=milestone:Q2-Checkout
-/afk-pipeline --goal=label:slice/checkout
-/afk-pipeline --goal=#42,#43,#44,#45
-/afk-pipeline --goal=parent:#100  # all issues with "Part of #100" in body
-```
+`.host-orchestrator/config.json`: `base_branch`, `validate_hook`, `test_globs`, `model_map`, `role_tiers`, `labels`, `deny_paths` (orthogonal ratchets/guards the agents must never touch), `required_checks`, `max_parallel`. Hook contract: `scripts/wave-validate.sh --json` → `{"status":"ok"|"error","metrics":{...},"tests":{...}}`.
 
 ---
 
-## The `cc-afk` bash function (recommended entry point)
-
-Goal-driven AFK pipelines work best when you launch them with the right env vars already set (auto-compact threshold, max turns, etc.). The full incantation is verbose; wrap it in a shell function once.
-
-Add this to your `~/.zshrc` or `~/.bashrc`:
+## The `cc-afk` bash function (v4 — AFK entry point)
 
 ```bash
-# AFK pipeline launcher — Claude Code with Leo's host-orchestrator + /goal
+# AFK pipeline launcher — host-orchestrator v4 (Workflow-native)
 cc-afk() {
   if [ -z "$*" ]; then
-    echo "usage: cc-afk <goal-spec>"
-    echo "  examples:"
-    echo "    cc-afk milestone:Q2-Checkout"
-    echo "    cc-afk label:slice/checkout"
-    echo "    cc-afk \"#42,#43,#44,#45\""
+    echo "usage: cc-afk <scope> [+800k]   (ej: cc-afk milestone:PRD-0016 +800k)"
     return 1
   fi
-  local goal="$*"
-  CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000 \
-  CLAUDE_CODE_MAX_TURNS=50 \
-  CLAUDE_CODE_DISABLE_THINKING=1 \
-  CLAUDE_CODE_EFFORT_LEVEL=medium \
-  CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 \
-  CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING=1 \
-  DISABLE_TELEMETRY=1 \
   API_TIMEOUT_MS=1200000 \
   BASH_DEFAULT_TIMEOUT_MS=300000 \
   BASH_MAX_TIMEOUT_MS=1200000 \
-    claude --dangerously-skip-permissions \
-      "/goal Todas las GH issues que matchean '$goal' están cerradas con su PR mergeado a la base branch (issue closed AND linked PR merged).
-
-Para avanzar en cada turn, ejecutá:
-  /afk-pipeline --goal=\"$goal\"
-
-Mantené PROGRESS.md actualizado en la raíz del repo y .host-orchestrator/pipelines/<slug>.state.json. Una acción productiva por turn, no más."
+    claude --dangerously-skip-permissions "/prd-pipeline $*"
 }
-# Alias por memoria muscular (histórico): mismo comportamiento que cc-afk
-alias cc-afk-host=cc-afk
+alias cc-afk-host=cc-afk   # memoria muscular histórica
 ```
 
-### Usage
-
-```bash
-cc-afk milestone:Q2-Checkout
-cc-afk label:slice/checkout
-cc-afk "#42,#43,#44"
-```
-
-### Env vars set by `cc-afk` and why
-
-| Variable | Value | Why |
-|---|---|---|
-| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | `180000` | Auto-compact at 180K tokens (~18% of the 1M context window). Keeps context lean. |
-| `CLAUDE_CODE_MAX_TURNS` | `50` | Hard cap. Prevents runaway `/goal` loops if verifier never confirms. |
-| `CLAUDE_CODE_DISABLE_THINKING` | `1` | Disable extended thinking. AFK rewards velocity over depth. |
-| `CLAUDE_CODE_EFFORT_LEVEL` | `medium` | Balanced effort. `xhigh`/`max` is slow; `low` may miss nuance. |
-| `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` | `1` | No "rate this response" interruptions mid-AFK. |
-| `CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING` | `1` | `/rewind` not needed in AFK; saves overhead. |
-| `DISABLE_TELEMETRY` | `1` | Less network overhead. |
-| `API_TIMEOUT_MS` | `1200000` (20 min) | AFK tool calls can be long. |
-| `BASH_DEFAULT_TIMEOUT_MS` | `300000` (5 min) | Default for validate gates etc. |
-| `BASH_MAX_TIMEOUT_MS` | `1200000` (20 min) | Ceiling for long tests / installs. |
-
-### What `--dangerously-skip-permissions` means
-
-Equivalent to `--permission-mode bypassPermissions`. Saltea todos los permission prompts session-wide. **Solo usar en sesiones AFK** — para sesiones interactivas mantenés el modo normal con permission prompts.
+Dead vs v3 (the Workflow made them obsolete): `/goal` + Haiku verifier, `CLAUDE_CODE_MAX_TURNS`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_CODE_DISABLE_THINKING`, state.json, PROGRESS.md. Only the Bash/API timeouts survive (agents still run long commands). `--dangerously-skip-permissions` remains AFK-only — for supervised runs use a normal interactive session and answer the prompts.
 
 ---
 
@@ -271,13 +232,17 @@ Both commands share the brief format (engineering-workflow's `## Agent Brief` in
 host-orchestrator/
 ├── plugin.json
 ├── README.md                              # this file
+├── docs/
+│   └── SPEC-v4-workflow-engine.md         # la spec del motor (grillada + Piloto 1)
+├── workflows/
+│   └── prd-pipeline.js                    # EL MOTOR v4 (Workflow script determinístico)
 ├── commands/
-│   ├── parallel-implement-wave.md         # /parallel-implement-wave  (impl wave, host)
-│   ├── merge-orchestrate.md               # /merge-orchestrate        (merge wave, host)
-│   └── afk-pipeline.md                    # /afk-pipeline             (per-turn playbook for /goal-wrapped sessions)
+│   ├── prd-pipeline.md                    # /prd-pipeline             (pipeline driver v4)
+│   ├── parallel-implement-wave.md         # /parallel-implement-wave  (impl wave standalone)
+│   └── merge-orchestrate.md               # /merge-orchestrate        (merge wave standalone)
 └── agents/
-    ├── parallel-implementer.md            # Opus 4.8 subagent for implementation
-    └── merge-resolver.md                  # Opus subagent for merge / conflict
+    ├── parallel-implementer.md            # implementer discipline (TDD vertical slice)
+    └── merge-resolver.md                  # merge/conflict resolver (5 no-regression criteria)
 ```
 
 No `skills/`. No auto-invocation by phrase. The slash commands are the only entry points by design — all actions have non-trivial blast radius and benefit from explicit invocation.
@@ -288,15 +253,15 @@ No `skills/`. No auto-invocation by phrase. The slash commands are the only entr
 
 - `gh` CLI configured (`gh auth login`) — for PR + issue + comment + label operations.
 - A git repo with the base branch (current `HEAD`) tracking a remote.
-- Opus access on your Claude account (`parallel-implementer` forces `model: opus`; `merge-resolver` forces `model: opus`).
+- Access to the models your `model_map` names (default map needs Haiku/Sonnet/Opus; the explicit per-node model always overrides the agents' frontmatter).
 - For `/parallel-implement-wave`: GH issues labeled `ready-for-agent` (or `state/ready-for-agent`) with a `## Agent Brief` comment following the engineering-workflow ≥ 2.1.0 single-brief invariant.
 
 ## What this plugin does NOT do
 
-- **No PR review judgment**: assumes briefs are accepted (implement) or PRs are reviewed (merge). For a review pass, use `/review-fleet` (engineering-workflow) or `/review`.
+- **No PR review judgment in the standalone commands**: `/prd-pipeline` DOES run its own native review fleet (partition → reviewers → judge → applier) over the integrated diff; for interactive reviews use `/review-fleet` (engineering-workflow) or `/review`.
 - **No remote infrastructure dependency**: doesn't need GitHub Actions or any external CI. Validation runs in your shell.
 - **No containers. No OAuth token extraction.** Subagents inherit your Claude Code session's auth and your host environment.
-- **No cross-issue dependency cascade in one invocation**: if issue B depends on issue A, run two waves (A → merge → B). A future `/host-pipeline` command in this same plugin will compose dispatch → CI → merge in a single loop.
+- **No cross-issue dependency cascade in the standalone commands**: if issue B depends on issue A, run two waves (A → merge → B) — or use `/prd-pipeline`, whose wave loop handles the cascade (scout re-buckets per wave; deps unblock as PRs merge).
 - **No checkpoint JSON**: an append-only audit log (`.host-orchestrator/waves/<TS>.log`) is the state. GitHub state (PRs, labels) is the durable truth; re-invoking is idempotent.
 
 ---
@@ -308,16 +273,14 @@ engineering-workflow:
   /grill-with-docs → /to-prd → /to-issues (label: ready-for-agent + ## Agent Brief)
                                   │
                                   ▼
-                    /parallel-implement-wave
+              /prd-pipeline milestone:X +800k        (v4 engine, one command)
+                waves: scout → refresh → merge → implement → gate → publish
+                review fleet nativa → PR DRAFT prd/X → base
                                   │
                                   ▼
-                 [N open PRs, label afk-agent-pr]
-                                  │
-                                  ▼
-                        /merge-orchestrate
-                                  │
-                                  ▼
-                          merged to base
+                     botón verde de Leo (merge manual del PR final)
+
+(standalone, for surgical use: /parallel-implement-wave · /merge-orchestrate)
 ```
 
 ---

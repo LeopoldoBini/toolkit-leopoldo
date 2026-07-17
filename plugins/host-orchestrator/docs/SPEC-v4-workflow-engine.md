@@ -63,12 +63,15 @@ Script JS (determinístico, corre en background):
 |---|---|---|---|---|
 | **scout** | T2–T3 | low | `gh issue/pr list --json` → buckets estructurados | juicio, mutación |
 | **implementer** | T0–T1 | (sesión) | TDD + vertical slice en su worktree (disciplina actual de `parallel-implementer.md`) | push, `gh pr *`, salir del worktree |
+| **fixer mecánico** | T2 | medium | remediación bien especificada y verificable por gate (tipos, lint, codemods) — NO features | ídem implementer |
 | **validator** | T2–T3 | low | ejecuta `wave-validate.sh --json` (o autodetect) y reporta NÚMEROS via schema | decidir si pasa — eso es del script |
 | **serializer** (git-officer) | T1–T2 | medium | TODA mutación remota: push, `gh pr create/merge`, branch ops. Idempotente (check-then-act) | implementar, juzgar código |
 | **merge-resolver** | T0–T1 | high | resolver conflictos con intent packet; 5 criterios de no-regresión (sin cambios vs v3) | mergear él mismo (reporta; el serializer ejecuta) |
 | **reviewers/judge** (§3.7) | T0–T1 | high | revisar el diff integrado / fallar cada hallazgo | aplicar (eso es de appliers T1–T2) |
 
 **Regla dura:** ningún `agent()` sin modelo explícito (resuelto desde el tier via `model_map`). La lección del host-sin-pinnear muere acá: el "host" ahora es código, no tiene modelo.
+
+**Evidencia del Piloto 1 (2026-07-17, 53 agentes):** fixers T2 (sonnet) 9/9 gates sin reintentos en remediación mecánica (~42k output/nodo); validator T3 (haiku) 25/25 mediciones (~2k out); serializer T2 14/14. El costo real de un fixer son sus **cache-reads** (~35M/nodo), no su output — el tier del modelo importa menos que la cantidad de nodos y re-lecturas. De ahí el rol "fixer mecánico" T2.
 
 **Principio de elección (grilling 2026-07-16): modelo mínimo suficiente.** Dentro del rango del rol, el orquestador elige el tier más barato que cumple la vara de correctitud del nodo; escala solo donde el error es caro o irreversible. Doble objetivo explícito: máxima correctitud Y eficiencia de tokens (junto con el tope de presupuesto de §6.5).
 
@@ -77,6 +80,11 @@ Script JS (determinístico, corre en background):
 El script no tiene FS/git. La doctrina se re-expresa: **toda mutación remota corre en agentes `serializer` despachados secuencialmente por el script** (`await` uno por uno — el orden lo garantiza el código, no la disciplina del modelo). Los implementers siguen sin poder pushear (constraint triple-declarado en su prompt, como hoy).
 
 Cada mutación es **check-then-act** (idempotente): antes de `gh pr create`, verificar si ya existe PR para esa branch; antes de merge, verificar si ya está mergeado. Esto hace el replay del resume seguro (§3.5).
+
+**Refinamientos del Piloto 1 (2026-07-17):**
+- **Idempotencia por identidad de TRABAJO, no de branch:** el check primario es "¿existe PR MERGEADO para este trabajo?" (`gh pr list --head <branch> --state merged`), no "¿existe la branch?" — las branches se borran al mergear; la identidad durable del trabajo es su PR/issue.
+- **Prohibiciones explícitas en el prompt del serializer:** esperar checks de CI solo con loop foreground de Bash y SOLO los checks REQUERIDOS por nombre (los advisory tipo CodeRabbit quedan pending largo y bloquean para siempre); PROHIBIDO usar Monitor o terminar el turno "esperando" — el turno termina únicamente con el reporte estructurado emitido.
+- El serializer estampa el audit log SOLO con las mutaciones que ejecutó (no las constatadas).
 
 **Dos PRDs en paralelo no se pisan por diseño:** cada workflow solo muta su rama `prd/X` y las branches de sus issues; la base solo se *lee* (fetch en el refresh); el único write a la base es el botón verde manual de Leo. Punto de contacto restante: labels de issues — disjuntos por milestone.
 
@@ -94,7 +102,7 @@ PASA ⇔  tests_propios == verde                      (los tests del slice, todo
 
 - **Tests propios (DECIDIDO en grilling 2026-07-16, opción B):** `tests_propios` = tests en archivos de test tocados por el diff del PR, derivado mecánicamente de `git diff --name-only` + `test_globs` del config (default por runtime). El gate exige además que el diff agregue ≥ 1 test nuevo (anti "slice sin tests"). El auto-reporte del implementer va al audit log pero NUNCA participa del `if`. Ajuste para slices que solo modifican tests existentes: el requisito "≥ 1 test nuevo" se relaja a "≥ 1 test agregado O modificado".
 - **Baseline:** se captura UNA vez por wave, sobre `prd/X` recién refrescada (Fase 1), corriendo el mismo validador. `{metrics: {<nombre>: N, ...}, failing_tests: [nombres]}`.
-- **Contrato del hook:** `scripts/wave-validate.sh --json` emite `{"status": "ok" | "measurement_failed", "metrics": {"ts_errors": N, ...}, "tests": {"failed": M, "failed_names": [...]}}`. Sin hook → el validator autodetecta el stack (default JS: package manager + typecheck + test; `metrics.ts_errors`) y reporta el mismo contrato en su schema de salida.
+- **Contrato del hook:** `scripts/wave-validate.sh --json` emite `{"status": "ok" | "error", "metrics": {"ts_errors": N, ...}, "tests": {"failed": M, "failed_names": [...]}}` (contrato validado en el Piloto 1 con `check.mjs --json`). Sin hook → el validator autodetecta el stack (default JS: package manager + typecheck + test; `metrics.ts_errors`) y reporta el mismo contrato en su schema de salida.
 - **Medición inválida ≠ éxito (aprendizaje Piloto 1, 2026-07-16):** el contrato DEBE distinguir "medí 0" de "no pude medir". Si la herramienta de medición muere (OOM, crash, output vacío/no parseable), el hook emite `status: "measurement_failed"` — y el gate lo trata como BLOCKED de la medición (reintento o freno), NUNCA como métricas en cero. Origen: en CI, `tsc` murió por OOM y el output vacío se leyó como "0 errores". Un gate-como-código no puede permitir que una medición rota parezca verde.
 - **La comparación es un `if` en JS.** El validator reporta números; jamás opina. Rojo → no PR, worktree conservado, label + comment en la issue (via serializer), igual que hoy.
 
@@ -149,12 +157,15 @@ Contexto de la decisión: la v4 tiene vocación de **reemplazar el flujo de impl
   "test_globs": ["**/*.test.*", "**/*.spec.*"],  // qué es "archivo de test" para el gate (§3.3)
   "model_map": { "T0": "fable", "T1": "opus", "T2": "sonnet", "T3": "haiku" },  // ÚNICO lugar nominal a modelos
   "role_tiers": {},                     // override por rol, p.ej. {"implementer": "T2"} para repos triviales
-  "labels": { "ready": "ready-for-agent", "agent_pr": "afk-agent-pr" }
+  "labels": { "ready": "ready-for-agent", "agent_pr": "afk-agent-pr" },
+  "deny_paths": []                      // rutas VEDADAS a los agentes: ratchets/guards ortogonales del repo
 }
 scripts/wave-validate.sh            (existente; NUEVO modo --json, ver §3.3)
 ```
 
 Issues: mismo contrato de hoy (label `ready-for-agent`, `## Agent Brief`, `Blocked by`).
+
+**Ratchets ortogonales como deny-lists (aprendizaje Piloto 1):** si el repo tiene otros guards/ratchets (ej. doctrine-guard, deuda declarada por ADR), sus dominios van en `deny_paths` y en el `excluye` de cada prompt — un agente que "mejora" código vedado por otro ratchet produce PRs que ese ratchet rechaza (pasó con routes-deuda ADR-0023: 2 PRs revertidos). Los ratchets del repo no se negocian entre sí: se excluyen por adelantado.
 
 ### 3.11 Decisiones técnicas menores (CTO, cerradas en el grilling)
 
@@ -162,6 +173,16 @@ Issues: mismo contrato de hoy (label `ready-for-agent`, `## Agent Brief`, `Block
 - **Gate rojo → reintento:** 1 reintento por issue dentro de la corrida, re-despachando el implementer con el output del gate como feedback (worktree conservado). Segundo rojo → label `agent-blocked` + comment con el log (via serializer), la wave sigue con el resto. Sin heroísmos.
 - **Permisos:** AFK real = `--dangerously-skip-permissions` (como hoy; nadie contesta prompts en background). Piloto 2 supervisado = sesión interactiva normal.
 - **Roles de agente:** los `agent()` referencian los `agents/*.md` del plugin via `agentType` (una sola fuente de disciplina, compartida con los comandos standalone).
+
+### 3.12 Hardening del script (aprendizajes Piloto 1, 2026-07-17 — obligatorios en el motor)
+
+Patrones de referencia en `App.SaltaCompra:.host-orchestrator/pilots/ratchet-ts.workflow.js` (commiteado, PR #352):
+
+1. **Normalización de `args`:** puede llegar objeto O string JSON según cómo se invoque el tool → primera línea del script: `const A = typeof args === 'string' ? JSON.parse(args) : args`. (Un crash en frío del Piloto 1.)
+2. **`llamar()` — `agent()` endurecido:** `agent()` puede tirar throw (ej. "subagent completed without calling StructuredOutput") o devolver null. Wrapper con 1 reintento donde el intento 1 es **byte-idéntico** (preserva el cache del resume) y el 2 cache-bustea el label + declara el reintento y exige verificar estado previo. TODO `agent()` del motor pasa por acá.
+3. **Budget por `args` con log de fuente:** la directiva "+N" del turno demostró ser frágil (llegó null y el corte nunca gatilló) → fuente primaria `args.budgetTotal`, fallback `budget.total`, y `log()` de qué fuente quedó activa (o "sin tope").
+4. **Mediciones inmunes al harness:** los prompts de validators fijan timeouts explícitos por comando (los defaults del harness matan un `tsc`/`test` largo) y semántica de error (`status:'error'` del hook → campo `error` + sentinelas −1; el gate lo trata como fallo de medición, nunca como datos).
+5. **Los reintentos de gate re-usan el worktree** (el retry-fixer recibe el path y los motivos numéricos exactos del gate); worktrees de gates FAIL se conservan para autopsia.
 
 ## 4. Migración v3 → v4
 
@@ -177,7 +198,7 @@ Issues: mismo contrato de hoy (label `ready-for-agent`, `## Agent Brief`, `Block
 
 ## 5. Plan de pilotos
 
-1. **Piloto 1 — ratchet TS (App.SaltaCompra), riesgo bajo:** workflow ad-hoc reducido (sin política de rama milestone, PRs de solo-tipos directo a master) que valida los patrones núcleo: validator con salida JSON + gate como `if` + serializer idempotente + tiering pinneado + resume tras kill manual. Criterio de éxito: 0 decisiones de gate tomadas por un modelo.
+1. ✅ **Piloto 1 — COMPLETADO (2026-07-17, 4 corridas supervisadas): 6/6 criterios validados.** 10 gates decididos por `if` puro (0 juicio de modelo), serializer idempotente (kill a mitad de mutación → resume → constata y completa), 3 resumes sin mutación duplicada, corte por budget en boundary validado, `log()` contó la historia sola. Resultado colateral: deuda TS 1.066→51 (−95%) en 10 PRs, 0 regresiones. Los 9 aprendizajes quedaron incorporados: §3.1 (fixer mecánico T2 + evidencia de tokens), §3.2 (identidad de trabajo, prohibiciones del serializer), §3.3 (status ok|error), §3.10 (deny_paths), §3.12 (hardening completo).
 2. **Piloto 2 — PRD-0016 con `/prd-pipeline` completo, SUPERVISADO** (Leo mirando, sesión interactiva, no AFK): política de rama + refresh + waves + review fleet + PR final draft. Criterio de éxito: el PR `prd/0016 → master` queda listo para botón verde sin intervención manual intermedia (más allá de permisos).
 
 Aprendizajes del piloto 1 se incorporan a la spec ANTES de construir el motor completo.

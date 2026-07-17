@@ -40,8 +40,26 @@ export const meta = {
 // }
 // ============================================================================
 
-// §3.12.1 — args puede llegar objeto o string JSON según cómo se invoque el tool
-const A = typeof args === 'string' ? JSON.parse(args) : args
+// §3.12.1 — args puede llegar objeto o string JSON según cómo se invoque el tool.
+// GUARDA: el orquestador T0 DEBE componer el objeto args (paso 2 de commands/prd-pipeline.md:
+// scope, models, tiers, rama, base, budgetTotal, ...). Pasar el scope crudo ("milestone:X +800k")
+// como string NO es válido — se rechaza acá con un mensaje claro en vez de un JSON.parse críptico.
+function parseArgs(a) {
+  if (a && typeof a === 'object') return a
+  if (typeof a === 'string') {
+    const s = a.trim()
+    if (!s.startsWith('{')) {
+      throw new Error(
+        `prd-pipeline: args inválido. Recibí el scope crudo (${JSON.stringify(s.slice(0, 60))}) en vez del objeto args. ` +
+          `El orquestador T0 debe COMPONER args (scope/models/tiers/rama/base/budgetTotal/...) siguiendo el paso 2 de commands/prd-pipeline.md, ` +
+          `no pasar la directiva del comando literal.`
+      )
+    }
+    return JSON.parse(s)
+  }
+  throw new Error(`prd-pipeline: args ausente o de tipo no soportado (${typeof a}). Componé el objeto args (ver commands/prd-pipeline.md).`)
+}
+const A = parseArgs(args)
 
 const M = A.models
 const T = A.tiers
@@ -326,7 +344,7 @@ IMPORTANTE: reportá tu recomendación por el output estructurado (schema), no p
       phase: faseTag,
       model: M[T.resolver],
       effort: 'high',
-      agentType: 'merge-resolver',
+      agentType: 'host-orchestrator:merge-resolver',
       schema: RESOLVER_SCHEMA,
     }
   )
@@ -614,7 +632,7 @@ Reportá por el output estructurado (schema; no XML): worktree = pwd absoluto, b
       model: M[tier],
       effort: 'medium',
       isolation: 'worktree',
-      agentType: 'parallel-implementer',
+      agentType: 'host-orchestrator:parallel-implementer',
       schema: IMPL_SCHEMA,
     }
   )

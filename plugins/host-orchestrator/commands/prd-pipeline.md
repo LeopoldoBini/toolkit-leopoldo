@@ -43,7 +43,7 @@ Defaults del config (todos opcionales): `base_branch` (default: default branch d
 - **`runLabel`**: `<rama sin prefijo>-<fecha corta>` (ej. `prd0016-0718`).
 - **`tiers`** — TU decisión de diseño como T0, dentro de los rangos de la spec §3.1 (brújula: scout/validator T2–T3, implementer T0–T1 —o T2 si la tanda es remediación mecánica—, serializer T1–T2, resolver/reviewer/judge T0–T1, applier T1–T2). Principio: **modelo mínimo suficiente**. Aplicá `role_tiers` del config si existe. Declarale a Leo la asignación elegida y por qué (2 líneas) ANTES de lanzar.
 - **`issueTiers`** (opcional): si conocés issues puntuales triviales/críticas, override por número.
-- **`budgetTotal`**: del `+Nk` del comando. Sin él, avisale a Leo que corre SIN TOPE y pedile confirmación.
+- **`budgetTotal`**: del `+Nk` del comando. **Sin `+Nk`: NO corras sin tope** — calculá y proponele a Leo un tope con la regla calibrada en el Piloto 1: `~100k × issues del scope + 200k de review fleet` (redondeado hacia arriba a la centena de k). Leo confirma el número o da otro; solo corré sin tope si él lo pide con esas palabras.
 - **`ts`**: el `date -Iseconds` del pre-flight.
 
 ### 3 — Confirmar y lanzar

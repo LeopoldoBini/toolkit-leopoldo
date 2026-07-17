@@ -39,7 +39,7 @@ Fallos de precondición → reportar BLOCKED y frenar (no lanzar nada).
 
 Defaults del config (todos opcionales): `base_branch` (default: default branch del remoto), `validate_hook`, `test_globs` (default `["**/*.test.*","**/*.spec.*"]`), `model_map` (default `{T0:'fable',T1:'opus',T2:'sonnet',T3:'haiku'}`), `role_tiers`, `labels` (default `{ready:'ready-for-agent', agentPr:'afk-agent-pr'}`), `deny_paths`, `required_checks`, `max_parallel`.
 
-- **`rama`**: `prd/<slug>` si el scope es milestone; `batch/<slug>` para label/parent/lista. Slug = scope value en kebab-case.
+- **`rama`**: ANTES de computar nada: `git ls-remote origin 'refs/heads/prd/*' 'refs/heads/batch/*'` — si YA existe una rama integradora que corresponde a este scope (de una corrida anterior), **REUSALA con su nombre exacto**, no inventes una variante (aprendizaje Piloto 2: una rama redundante forkeada bloquea la corrida). Si no existe: `prd/<slug>` para milestone, `batch/<slug>` para label/parent/lista; slug = scope value en kebab-case.
 - **`runLabel`**: `<rama sin prefijo>-<fecha corta>` (ej. `prd0016-0718`).
 - **`tiers`** — TU decisión de diseño como T0, dentro de los rangos de la spec §3.1 (brújula: scout/validator T2–T3, implementer T0–T1 —o T2 si la tanda es remediación mecánica—, serializer T1–T2, resolver/reviewer/judge T0–T1, applier T1–T2). Principio: **modelo mínimo suficiente**. Aplicá `role_tiers` del config si existe. Declarale a Leo la asignación elegida y por qué (2 líneas) ANTES de lanzar.
 - **`issueTiers`** (opcional): si conocés issues puntuales triviales/críticas, override por número.

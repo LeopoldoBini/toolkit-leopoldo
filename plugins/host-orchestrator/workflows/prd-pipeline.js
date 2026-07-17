@@ -382,6 +382,7 @@ const wavesReporte = []
 const bugsReales = []
 const bloqueadas = []
 const pendientes = []
+let inReviewUltimo = [] // PRs rojos/no-mergeables: NO accionables por el motor, van a para_leo
 let allDone = false
 let baseMetrics = null
 
@@ -429,6 +430,7 @@ Reportá por schema. En 'detalle' de cada issue: 1 línea con la evidencia del b
       Object.entries(buckets).map(([b, l]) => `${b}:${l.length}`).join(' ')
   )
   for (const i of buckets.HUMAN_GATED ?? []) bloqueadas.push(`#${i.number} HUMAN_GATED: ${i.detalle ?? i.title}`)
+  inReviewUltimo = (buckets.IN_REVIEW ?? []).map((i) => `#${i.number} IN_REVIEW (PR #${i.pr_number ?? '?'}): ${i.detalle ?? i.title} — requiere intervención humana antes de re-correr`)
 
   if (scout.all_done) {
     allDone = true
@@ -808,6 +810,7 @@ const reporte = {
   para_leo: [
     ...(reviewReporte.juicio?.humano ?? []).map((h) => `[review] ${h.titulo}: ${h.decision_necesaria}`),
     ...bloqueadas,
+    ...inReviewUltimo,
   ],
   tokens_spent: budget.spent(),
 }

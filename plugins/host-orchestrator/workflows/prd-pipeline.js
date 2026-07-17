@@ -405,14 +405,15 @@ for (let wave = 1; wave <= A.maxWaves; wave++) {
         : `gh issue list ${scopeQuery} --state all --json number,title,state,labels,body --limit 200`
     }
 3. Por cada issue, bucketeá con estas reglas EXACTAS (primera que matchee):
-   - DONE: issue cerrada Y su PR mergeado.
+   - DONE: existe PR MERGEADO hacia ${RAMA} que referencia la issue. OJO: la issue puede seguir ABIERTA — las issues se cierran recién cuando el PR final llega a ${BASE}; el PR mergeado ES la identidad del trabajo hecho. (También DONE si la issue está cerrada con PR mergeado.)
    - HUMAN_GATED: label 'agent-blocked' (o variantes 'agent-blocked-*').
    - MERGE_READY: PR abierto hacia ${RAMA} con label '${A.labels.agentPr}', sin label 'merge-blocked'.
    - IN_REVIEW: PR abierto pero con checks fallidos, conflictos o 'merge-blocked'.
-   - BLOCKED_BY_DEP: el body tiene 'Blocked by #X' con X no cerrada (listá los números en blocked_by).
-   - IMPLEMENTABLE: sin PR abierto, label '${A.labels.ready}' (o 'state/${A.labels.ready}'), deps cerradas.
-   Buscá PRs con: gh pr list --state all --search "<n> in:title" --json number,state,headRefName,labels,mergeable,statusCheckRollup (y validá que referencie la issue).
-4. all_done = ¿todas DONE?
+   - BLOCKED_BY_DEP: el body tiene 'Blocked by #X' con X no DONE (listá los números en blocked_by).
+   - IMPLEMENTABLE: sin PR abierto ni mergeado, label '${A.labels.ready}' (o 'state/${A.labels.ready}'), deps cerradas.
+   - NINGUNA regla matchea (ej. sin label ready, sin PR) → HUMAN_GATED con detalle 'sin regla aplicable: <por qué>'.
+   Buscá PRs con: gh pr list --state all --search "<n> in:title" --json number,state,headRefName,labels,mergeable,statusCheckRollup (y validá que referencie la issue; incluí los MERGED).
+4. all_done = ¿todas DONE o HUMAN_GATED sin nada accionable? → all_done=true SOLO si no queda NADA accionable (ni MERGE_READY ni IMPLEMENTABLE ni IN_REVIEW) y hay al menos una DONE.
 
 Reportá por schema. En 'detalle' de cada issue: 1 línea con la evidencia del bucket.${suf}`,
     { label: `scout:w${wave}`, phase: FASE, model: M[T.scout], effort: 'low', schema: SCOUT_SCHEMA }

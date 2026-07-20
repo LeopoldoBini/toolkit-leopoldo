@@ -305,7 +305,7 @@ function medir(donde, faseTag, etiqueta, { conDiff = false, pull = false } = {})
    → diff_toca_tests = ¿algún archivo del diff matchea ${JSON.stringify(A.testGlobs)}?
    → corré SOLO los archivos de test del diff → tests_del_diff_verdes = ¿todos verdes? (sin tests en el diff → false)`
     : ''
-  const pre = pull ? `0. git fetch origin && git pull --ff-only origin ${RAMA}\n` : ''
+  const pre = pull ? `0. cd ${donde} && git fetch origin && git pull --ff-only origin ${RAMA}\n` : ''
   return llamar(
     (suf) => `Sos un MEDIDOR. Ejecutá EXACTAMENTE estos comandos en orden y reportá NÚMEROS por schema. No opines, no arregles nada, no toques ningún archivo.
 

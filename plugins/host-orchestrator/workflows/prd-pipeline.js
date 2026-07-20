@@ -805,7 +805,8 @@ if (allDone) {
     `Cerrar el pipeline: PR draft de ${RAMA} hacia ${BASE}.
 1. cd ${WT_INTEGRACION} && git pull --ff-only
 2. CHECK identidad de trabajo: ¿ya existe PR (abierto o mergeado) ${RAMA} → ${BASE}? → reportá su número ('ya_estaba').
-3. Si no: gh pr create --draft --base ${BASE} --head ${RAMA} --title "${A.scope.type}:${A.scope.value} — pipeline ${A.runLabel}" --body con: resumen del scope, lista de issues cerradas con sus PRs (sacala de gh), nota del review fleet, y "PR integrador para botón verde de Leo. 🤖 Generated with [Claude Code](https://claude.com/claude-code)" (contexto audit: pr-final-create)`,
+3. Si no: gh pr create --draft --base ${BASE} --head ${RAMA} --title "${A.scope.type}:${A.scope.value} — pipeline ${A.runLabel}" --body con: resumen del scope, lista de issues cerradas con sus PRs (sacala de gh), nota del review fleet, y "PR integrador para botón verde de Leo. 🤖 Generated with [Claude Code](https://claude.com/claude-code)" (contexto audit: pr-final-create)
+4. Sobre el PR (nuevo o 'ya_estaba', si está ABIERTO): gh pr comment <numero> --body "@coderabbitai review" — CodeRabbit skipea drafts y bases no-default por config, el comentario fuerza la review externa; el T0 triagea sus observaciones después (contexto audit: pr-final-coderabbit). Idempotencia: si el PR ya tiene un comentario "@coderabbitai review", no dupliques.`,
     'pr-final',
     'Cierre'
   )

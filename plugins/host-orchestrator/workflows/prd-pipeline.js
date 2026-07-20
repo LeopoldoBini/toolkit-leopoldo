@@ -311,7 +311,14 @@ ${hook}
 ${diff}
 Si un comando no puede correr: status:'error' con el mensaje en 'error'.${suf}`,
     { label: `validator:${etiqueta}`, phase: faseTag, model: M[T.validator], effort: 'low', schema: MEDICION_SCHEMA }
-  )
+  ).then((r) => {
+    // §3.3 — sin hook, el contrato de metrics es EXACTAMENTE {typecheck_errors}. Un
+    // validator que sobre-reporta claves extra (p.ej. tests_passed en el baseline)
+    // haría exigir al ratchet métricas que las mediciones siguientes nunca pidieron
+    // (y tests_passed invierte "menor es mejor"). Normalizar acá, en código.
+    if (r && !A.validateHook && r.metrics) r.metrics = { typecheck_errors: r.metrics.typecheck_errors }
+    return r
+  })
 }
 
 // ---------------------------------------------------------------------------

@@ -59,8 +59,8 @@
     },
     {
       "name": "memory-flow",
-      "description": "CLAUDE.md + MEMORY.md flow: /revisar_memoria audita y detecta entradas para graduar; /actualizar_memoria implementa las recomendaciones. Incluye agent claude-memory-auditor para auditorías exhaustivas. Alineado con la política de 3 artefactos (CLAUDE.md = arquitectura, MEMORY.md = aprendizajes sesionales, CONTEXT.md = vocabulario de dominio).",
-      "version": "1.0.0",
+      "description": "Barrido batch de memoria: /revisar_memoria clasifica memorias del formato por-archivo (VIGENTE/STALE/GRADUABLE/OBSOLETA/FUSIONABLE) y propone graduaciones a CLAUDE.md/CONTEXT.md. Solo reporta; aplica con OK explícito. Complemento del flujo orgánico (graduar/corregir al tocar) — v2 elimina /actualizar_memoria y el agente auditor.",
+      "version": "2.0.0",
       "author": {
         "name": "Leopoldo Bini"
       },

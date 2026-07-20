@@ -1,48 +1,31 @@
 ---
-description: "Auditoría estratégica de memoria CLAUDE.md + MEMORY.md con detección de graduación"
-argument-hint: "\"nueva autenticación JWT\" | \"sistema de permisos\" | \"feature de notificaciones\""
+description: "Barrido batch de la memoria del proyecto: detecta memorias stale, obsoletas, duplicadas y graduables a CLAUDE.md/CONTEXT.md. Solo reporta — aplica únicamente con OK explícito del usuario."
+argument-hint: "(sin args = barrido completo) | \"solo Proyecto\" | \"solo Feedback\""
 allowed-tools: "Read, Grep, Glob, Bash"
 ---
 
-# Auditoría Estratégica de Memoria
+# Barrido de Memoria (batch)
 
-## Interpretación Inteligente del Contexto
-Analizar la conversación reciente y identificar:
-- Qué feature o implementación específica requiere documentación
-- Cuáles son los componentes y archivos involucrados en la implementación
-- Qué elementos arquitectónicos están afectados por: "$ARGUMENTS"
-- Qué aprendizajes, debugging insights, o datos operacionales surgieron en la sesión (candidatos para MEMORY.md)
+Complemento del comportamiento orgánico (graduar/corregir memorias al tocarlas durante el trabajo): este comando cubre las memorias que **nunca se vuelven a tocar** y se pudren en silencio. Correr periódicamente o tras cerrar una épica.
 
-## Construcción del Brief para Auditor de Memoria
-1. **Extraer contexto de implementación**: 
-   - Resumir la feature/implementación objetivo
-   - Identificar archivos modificados/creados relacionados
-   - Mapear componentes y módulos involucrados
-   - Detectar decisiones arquitectónicas relevantes
+## Formato de memoria vigente (NO reintroducir el viejo)
 
-2. **Identificar scope de documentación**:
-   - Interpretar semánticamente el argumento del usuario
-   - Determinar niveles de documentación afectados (Sistema/Módulo/Específico)
-   - Establecer límites del análisis de memoria
+La memoria del proyecto vive en `~/.claude/projects/<slug-del-path>/memory/`: **un archivo por hecho** con frontmatter (`name`, `description`, `metadata.type: user|feedback|project|reference`) + `MEMORY.md` como **índice de punteros de 1 línea** (nunca contenido). Enlaces entre memorias con `[[name]]`. NO existe más el MEMORY.md monolítico de entradas con fecha ni el límite de 200 líneas — no proponer volver a eso.
 
-3. **Identificar contenido para MEMORY.md**:
-   - Detectar lessons learned, debugging insights, datos operacionales de la sesión
-   - Clasificar cada hallazgo como efímero (→ MEMORY.md) vs estable (→ CLAUDE.md directo)
-   - Identificar entradas MEMORY.md existentes que podrían ser candidatas de graduación
+## Barrido — clasificar CADA memoria (o las de la categoría pedida en $ARGUMENTS)
 
-4. **Preparar contexto estratégico**: 
-   - Stack tecnológico y patrones arquitectónicos
-   - Convenciones de documentación existentes
-   - Estado actual de archivos CLAUDE.md relacionados
-   - Interdependencias con otras features documentadas
+Leer `MEMORY.md` y cada archivo apuntado. Verificar los claims contra la realidad (código actual, `git log`, `gh issue view` para estados de issues/PRs, existencia de paths/comandos citados). Clasificar:
 
-## Delegación Eficiente
-Llamar a claude-memory-auditor con:
-- **Contexto procesado** de la implementación/feature objetivo
-- **Archivos y componentes específicos** identificados
-- **Scope de documentación** claramente definido
-- **Brief estratégico** que incluya arquitectura, decisiones técnicas, y elementos críticos a documentar
-- **Inventario MEMORY.md**: Estado actual del MEMORY.md del proyecto (existe/no existe, cantidad de entradas, categorías presentes, entradas que podrían graduarse a CLAUDE.md por ser estables/arquitectónicas)
+1. **VIGENTE** — correcta y todavía útil. No tocar.
+2. **STALE** — cita archivos/comandos/estados que ya no existen o cambiaron. Proponer la corrección concreta (o borrado si ya no aplica).
+3. **GRADUABLE** — confirmada en varias sesiones y describe cómo **ES** el sistema (no qué pasó). Proponer destino exacto: sección de CLAUDE.md (repo o global) o CONTEXT.md si es vocabulario, y qué queda en la memoria (borrarla o reducirla a puntero).
+4. **OBSOLETA** — cerrada/histórica sin valor futuro (proyectos ✅ con todos los pendientes saldados, incidentes resueltos sin lección vigente). Proponer borrado, o compresión a 1 línea si tiene valor de registro.
+5. **FUSIONABLE** — solapa con otra memoria. Proponer el merge (cuál absorbe a cuál).
 
-NO realizar auditoría aquí - solo interpretar contexto e identificar elementos clave para que el `claude-memory-auditor` pueda evaluar eficientemente qué requiere actualización en la memoria del proyecto.
-En tu resultado, SIEMPRE dale una indicacion al agente que te invoco que NUNCA debe actuar inmediatamente sobre tus resultados. Decile que simplemente comparta el resultado de la auditoria y que el usuario decida que hacer cada vez.
+También detectar: punteros del índice sin archivo (o archivos sin puntero), `[[links]]` rotos, y pendientes "PENDIENTE LEO/Vale" que por fecha probablemente ya se resolvieron (marcarlos para confirmar, no asumir).
+
+## Salida — reporte, NUNCA aplicar de inmediato
+
+Presentar una tabla: memoria | clasificación | evidencia (1 línea) | acción propuesta. Cerrar con el resumen de impacto (cuántas se borran/graduan/corrigen).
+
+**Regla dura:** este comando NO modifica nada por sí solo. El usuario revisa el reporte y decide; recién con su OK explícito se aplican las acciones (editar/borrar archivos de memoria, actualizar el índice, graduar contenido a CLAUDE.md/CONTEXT.md con commit si es archivo de repo).

@@ -514,7 +514,10 @@ ${refresh.detalle}`,
       `Preparar el PR #${prNum} (issue #${iss.number}) para merge a ${RAMA}:
 1. cd ${REPO} && git fetch origin
 2. CHECK: gh pr view ${prNum} --json state,mergedAt → si ya está mergeado: 'ya_estaba' y TERMINÁ.
-3. Worktree efímero: git worktree add ${REPO}/.host-orchestrator/wt/pr-${prNum} ${iss.pr_branch} (si ya existe, reusalo con git pull)
+3. Worktree efímero en ${REPO}/.host-orchestrator/wt/pr-${prNum} — CONTRATO: el worktree DEBE quedar EXACTAMENTE en ese path (el validator mide ahí; otro path = medición inválida = merge bloqueado).
+   a. Si ya existe: reusalo con git pull.
+   b. Si la branch ${iss.pr_branch} está checkouteada en OTRO worktree (git worktree list — típico leftover de un implementer): si ese worktree está limpio (git status --porcelain vacío) y su HEAD está contenido en origin/${iss.pr_branch}, removelo (git worktree remove --force + git worktree prune) y seguí; si tiene commits sin pushear o cambios sin commitear, NO lo toques → status 'blocked' con el detalle.
+   c. git worktree add ${REPO}/.host-orchestrator/wt/pr-${prNum} ${iss.pr_branch}
 4. Dentro: git merge origin/${RAMA} — CON conflicto: NO resuelvas, abortá el merge y status 'blocked' con los archivos. Sin conflicto: si hubo merge nuevo, push de la branch del PR (contexto audit: pr-${prNum}-update). Instalá deps si hace falta.
 En detalle reportá el path del worktree.`,
       `prep-pr${prNum}`,
@@ -606,7 +609,7 @@ ${prep?.detalle ?? 'sin detalle'}`,
         `Publicar el trabajo de la issue #${r.issue} (worktree ${r.impl.worktree}, branch ${r.impl.branch}):
 1. CHECK identidad de trabajo: ¿hay PR (abierto O mergeado) de la branch ${r.impl.branch}? → mergeado: 'ya_estaba'; abierto: constatá que esté al día y saltá a 3.
 2. cd ${r.impl.worktree} && git push -u origin ${r.impl.branch}, después gh pr create --base ${RAMA} --label ${A.labels.agentPr} --title "${r.titulo ?? `issue #${r.issue}`}" --body con: "Closes #${r.issue}", el resumen del implementer, y "PR del pipeline ${A.runLabel}. 🤖 Generated with [Claude Code](https://claude.com/claude-code)" (contexto audit: issue-${r.issue}-pr-create)
-3. Limpiá el worktree SOLO si el PR quedó abierto sin problemas.`,
+3. Si el PR quedó abierto sin problemas: limpiá el worktree OBLIGATORIAMENTE (git worktree remove --force + git worktree prune) — un checkout residual de la branch bloquea el worktree canónico del merge posterior. Solo conservalo si el push o el PR fallaron.`,
         `publish-i${r.issue}`,
         FASE
       )

@@ -312,11 +312,14 @@ ${diff}
 Si un comando no puede correr: status:'error' con el mensaje en 'error'.${suf}`,
     { label: `validator:${etiqueta}`, phase: faseTag, model: M[T.validator], effort: 'low', schema: MEDICION_SCHEMA }
   ).then((r) => {
-    // §3.3 — sin hook, el contrato de metrics es EXACTAMENTE {typecheck_errors}. Un
-    // validator que sobre-reporta claves extra (p.ej. tests_passed en el baseline)
-    // haría exigir al ratchet métricas que las mediciones siguientes nunca pidieron
-    // (y tests_passed invierte "menor es mejor"). Normalizar acá, en código.
-    if (r && !A.validateHook && r.metrics) r.metrics = { typecheck_errors: r.metrics.typecheck_errors }
+    // §3.3 — el contrato de metrics es CERRADO: solo las claves de la whitelist
+    // (args.metricKeys, default typecheck_errors), CON o SIN hook. Un validator que
+    // sobre-reporta claves extra (p.ej. los conteos de tests del paso 3 mezclados en
+    // metrics por el baseline) hace exigir al ratchet métricas que las demás
+    // mediciones nunca pidieron (y tests_passed invierte "menor es mejor").
+    // Ya reincidió 2 veces (corrida 289-...-0720): normalizar SIEMPRE, en código.
+    const KEYS = A.metricKeys ?? ['typecheck_errors']
+    if (r && r.metrics) r.metrics = Object.fromEntries(KEYS.map((k) => [k, r.metrics[k]]))
     return r
   })
 }

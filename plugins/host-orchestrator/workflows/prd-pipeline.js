@@ -1,6 +1,10 @@
 export const meta = {
-  name: 'prd-pipeline',
-  description: 'Motor v4 host-orchestrator: waves implement+merge sobre rama integradora, gate como código, review fleet nativa, PR final draft',
+  // ⚠️ NO 'prd-pipeline': colisionaría con el COMANDO commands/prd-pipeline.md y el
+  // slash command puede resolver al workflow pelado → recibe el scope crudo en vez
+  // del objeto args compuesto por T0 (pasó en la corrida 289-...-0720). La única
+  // entrada que se llama prd-pipeline es el comando; este script se lanza por scriptPath.
+  name: 'prd-pipeline-engine',
+  description: 'MOTOR INTERNO del pipeline AFK — NO invocar por nombre: la entrada es el comando /prd-pipeline, que compone args (scope/tiers/rama/budget) como orquestador T0 y lo lanza por scriptPath',
   phases: [
     { title: 'Setup' },
     { title: 'Review' },

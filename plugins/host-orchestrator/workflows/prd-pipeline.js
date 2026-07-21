@@ -396,6 +396,7 @@ const wavesReporte = []
 const bugsReales = []
 const bloqueadas = []
 const pendientes = []
+const cerradas = [] // issues con PR publicado a la integradora → van al `Closes #` del PR final (autocierre al mergear a la default branch)
 let inReviewUltimo = [] // PRs rojos/no-mergeables: NO accionables por el motor, van a para_leo
 let allDone = false
 let baseMetrics = null
@@ -621,6 +622,9 @@ ${prep?.detalle ?? 'sin detalle'}`,
         FASE
       )
       log(`publish #${r.issue}: ${pub?.status ?? 'blocked'} ${pub?.pr_number ? `→ PR #${pub.pr_number}` : ''}`)
+      // El PR por-issue va contra la rama integradora (no la default) → su "Closes #" es inerte.
+      // Anotamos la issue para inyectar el autocierre real en el PR final (integradora → default).
+      if (pub && pub.status !== 'blocked' && (pub.pr_number || pub.status)) cerradas.push(r.issue)
     }
   }
 
@@ -801,11 +805,15 @@ Reportá por schema: worktree (pwd absoluto), branch, aplicadas, falladas, resum
 phase('Cierre')
 let prFinal = null
 if (allDone) {
+  const issuesCierre = [...new Set(cerradas)]
+  const bloqueCierre = issuesCierre.length
+    ? `\n\nCLAVE — autocierre: el body DEBE incluir, en líneas propias, exactamente: ${issuesCierre.map((n) => `Closes #${n}`).join(', ')}. Son las issues cuyo PR por-issue fue contra la rama integradora (no la default), donde GitHub ignora el "Closes"; recién este PR final va a la default branch, así que ES el único lugar donde el autocierre surte efecto al mergearse. NO omitas ninguna ni uses otra redacción (nada de "issues cerradas: #N" en prosa — tiene que ser la keyword "Closes #N" que GitHub reconoce).`
+    : ''
   const cierre = await serializar(
     `Cerrar el pipeline: PR draft de ${RAMA} hacia ${BASE}.
 1. cd ${WT_INTEGRACION} && git pull --ff-only
-2. CHECK identidad de trabajo: ¿ya existe PR (abierto o mergeado) ${RAMA} → ${BASE}? → reportá su número ('ya_estaba').
-3. Si no: gh pr create --draft --base ${BASE} --head ${RAMA} --title "${A.scope.type}:${A.scope.value} — pipeline ${A.runLabel}" --body con: resumen del scope, lista de issues cerradas con sus PRs (sacala de gh), nota del review fleet, y "PR integrador para botón verde de Leo. 🤖 Generated with [Claude Code](https://claude.com/claude-code)" (contexto audit: pr-final-create)
+2. CHECK identidad de trabajo: ¿ya existe PR (abierto o mergeado) ${RAMA} → ${BASE}? → reportá su número ('ya_estaba'). Si ya existe y está ABIERTO pero su body NO trae los "Closes #" de abajo, editalo con gh pr edit para agregarlos.
+3. Si no: gh pr create --draft --base ${BASE} --head ${RAMA} --title "${A.scope.type}:${A.scope.value} — pipeline ${A.runLabel}" --body con: resumen del scope, lista de issues cerradas con sus PRs (sacala de gh), nota del review fleet, y "PR integrador para botón verde de Leo. 🤖 Generated with [Claude Code](https://claude.com/claude-code)" (contexto audit: pr-final-create)${bloqueCierre}
 4. Sobre el PR (nuevo o 'ya_estaba', si está ABIERTO): gh pr comment <numero> --body "@coderabbitai review" — CodeRabbit skipea drafts y bases no-default por config, el comentario fuerza la review externa; el T0 triagea sus observaciones después (contexto audit: pr-final-coderabbit). Idempotencia: si el PR ya tiene un comentario "@coderabbitai review", no dupliques.`,
     'pr-final',
     'Cierre'

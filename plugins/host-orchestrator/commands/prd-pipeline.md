@@ -1,6 +1,6 @@
 ---
 name: prd-pipeline
-description: Motor v4 Workflow-nativo del pipeline AFK — reemplaza a /afk-pipeline. Lanza el workflow determinístico (workflows/prd-pipeline.js) que implementa+mergea las issues de un scope sobre una rama integradora, con gate como código, review fleet nativa y PR final draft para el botón verde de Leo. Usage `/prd-pipeline milestone:<name> [+800k]` (también `label:`, `parent:#N`, lista `#42,#43`). La sesión que lo lanza es el orquestador T0 y decide el tiering por nodo.
+description: Motor v4 Workflow-nativo del pipeline AFK — reemplaza a /afk-pipeline. Lanza el workflow determinístico (workflows/prd-pipeline.js) que implementa+mergea las issues de un scope sobre una rama integradora, con gate como código, review fleet nativa y PR final draft para el botón verde de Leo. Usage `/prd-pipeline milestone:<name> [+800k]` (también `label:`, `parent:#N`, lista `#42,#43`); sin `+Nk` la corrida va SIN tope (el `+Nk` es un hard cap deliberado). La sesión que lo lanza es el orquestador T0 y decide el tiering por nodo.
 ---
 
 # /prd-pipeline
@@ -18,7 +18,7 @@ Compone `args` y lanza **`Workflow({ scriptPath: "${CLAUDE_PLUGIN_ROOT}/workflow
 ## Argumentos
 
 - **Scope** (requerido, posicional): `milestone:<name>` | `label:<label>` | `parent:#N` | `#42,#43,...`
-- **`+<N>k` / `+<N>m`** (recomendado): budget de tokens de la corrida — va al `args.budgetTotal` (fuente primaria; la directiva del turno es solo fallback, demostró ser frágil).
+- **`+<N>k` / `+<N>m`** (opcional): hard cap de tokens de la corrida — va al `args.budgetTotal` (fuente primaria; la directiva del turno es solo fallback, demostró ser frágil). **Sin `+Nk`, la corrida va SIN tope** (default desde v4.0.8) — pasalo solo cuando quieras limitarla deliberadamente.
 - **`--max-waves=N`** (default 8), **`--max-parallel=N`** (default 6, techo 8), **`--dry-run`** (mostrar plan + args sin lanzar).
 
 ## Pasos (vos, la sesión T0)
@@ -43,7 +43,7 @@ Defaults del config (todos opcionales): `base_branch` (default: default branch d
 - **`runLabel`**: `<rama sin prefijo>-<fecha corta>` (ej. `prd0016-0718`).
 - **`tiers`** — TU decisión de diseño como T0, dentro de los rangos de la spec §3.1 (brújula: scout/validator T2–T3, implementer T0–T1 —o T2 si la tanda es remediación mecánica—, serializer T1–T2, resolver/reviewer/judge T0–T1, applier T1–T2). Principio: **modelo mínimo suficiente**. Aplicá `role_tiers` del config si existe. Declarale a Leo la asignación elegida y por qué (2 líneas) ANTES de lanzar.
 - **`issueTiers`** (opcional): si conocés issues puntuales triviales/críticas, override por número.
-- **`budgetTotal`**: del `+Nk` del comando. **Sin `+Nk`: NO corras sin tope** — calculá y proponele a Leo un tope con la regla calibrada en el Piloto 1: `~100k × issues del scope + 200k de review fleet` (redondeado hacia arriba a la centena de k). Leo confirma el número o da otro; solo corré sin tope si él lo pide con esas palabras.
+- **`budgetTotal`**: del `+Nk` del comando si vino; **sin `+Nk` → `budgetTotal: null` (SIN tope)**. Decisión de Leo (22-jul, corrida PRD-0019: el tope +1000k cortó la corrida a 58 tokens del `minBudgetWave` dejando 2 slices y la review fleet afuera — un tope "razonable" corta donde no debe). NO le propongas un tope ni frenes esperando confirmación: lanzá sin cap e informale el costo estimado de referencia (`~150k × issues + 300k`, la regla vieja de 100k/issue quedó corta) para que sepa qué esperar. Con `+Nk` explícito el comportamiento no cambia: hard cap — es la forma deliberada de Leo de limitar una corrida.
 - **`ts`**: el `date -Iseconds` del pre-flight.
 
 ### 3 — Confirmar y lanzar
